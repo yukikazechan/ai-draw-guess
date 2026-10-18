@@ -136,9 +136,11 @@ export class CubismMoc {
    * .moc3 の整合性を検証する
    */
   public static hasMocConsistency(mocBytes: ArrayBuffer): boolean {
-    const isConsistent =
-      Live2DCubismCore.Moc.prototype.hasMocConsistency(mocBytes);
-    return isConsistent === 1 ? true : false;
+    if (typeof (Live2DCubismCore.Moc as any).hasMocConsistency === 'function') {
+      const isConsistent = (Live2DCubismCore.Moc as any).hasMocConsistency(mocBytes);
+      return Boolean(isConsistent);
+    }
+    return true;
   }
 
   _moc: Live2DCubismCore.Moc; // Mocデータ

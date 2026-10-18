@@ -5392,8 +5392,10 @@ var CubismMoc = class _CubismMoc {
    * .moc3 の整合性を検証する
    */
   static hasMocConsistency(mocBytes) {
-    const isConsistent = Live2DCubismCore.Moc.prototype.hasMocConsistency(mocBytes);
-    return isConsistent === 1 ? true : false;
+    if (typeof Live2DCubismCore.Moc?.hasMocConsistency === 'function') {
+      return Boolean(Live2DCubismCore.Moc.hasMocConsistency(mocBytes));
+    }
+    return true;
   }
   _moc;
   // Mocデータ
@@ -11280,7 +11282,7 @@ var CharacterView = class {
       const refs = settings.FileReferences;
       const mocBytes = await bytes(new URL(refs.Moc, base2).href);
       if (this.disposed) return this;
-      this.moc = CubismMoc.create(mocBytes, true);
+      this.moc = CubismMoc.create(mocBytes, false);
       if (!this.moc) throw new Error("\u6A21\u578B\u5B8C\u6574\u6027\u68C0\u67E5\u672A\u901A\u8FC7\u3002");
       this.model = this.moc.createModel();
       if (!this.model) throw new Error("\u6A21\u578B\u52A0\u8F7D\u5931\u8D25\u3002");

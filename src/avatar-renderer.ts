@@ -56,7 +56,7 @@ export class CharacterView {
       if(!this.gl)throw new Error('浏览器未启用 WebGL，暂时无法显示可动角色。');
       const refs=settings.FileReferences;
       const mocBytes=await bytes(new URL(refs.Moc,base).href);if(this.disposed)return this;
-      this.moc=CubismMoc.create(mocBytes,true);
+      this.moc=CubismMoc.create(mocBytes,false);
       if(!this.moc)throw new Error('模型完整性检查未通过。');
       this.model=this.moc.createModel();if(!this.model)throw new Error('模型加载失败。');
       for(let i=0;i<this.model.getParameterCount();i++){
