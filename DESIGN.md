@@ -1,0 +1,3 @@
+# Existing visual system
+
+The online extension inherits `public/style.css`: light blue paper background, dark navy text, blue primary controls, white work areas, and the existing WenKai font. Its secondary text uses #58677f for readability, and hover elevation uses a neutral shadow. It adds labeled account forms, guest invitation and registration, a room toolbar and a canvas with a participant sidebar. Usernames and room codes remain selectable text. Layout collapses into one column on mobile; all controls have visible keyboard focus and status messages use live regions. Existing game pages remain the authority for colors and type.

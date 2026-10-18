@@ -1,0 +1,10 @@
+.git
+.local
+.env
+.env.*
+!.env.example
+node_modules
+coverage
+*.log
+*.zip
+.impeccable

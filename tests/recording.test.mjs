@@ -40,6 +40,7 @@ test('人类笔迹增量保留撤销、清空与起止时间，重发去重并�
 test('自动存盘可在新进程恢复，未结束比赛禁止导出；尾行损坏保留已完成部分',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'draw-guess-record-')),store=new RecordingStore(dir),g=basic();store.attach(g);await g.next();await assert.rejects(store.get(g.id),/先结束/);assert.equal((await store.list()).length,0);
   await g.beginGuess({image});g.finish();await store.flush();const reloaded=new RecordingStore(dir),out=await reloaded.get(g.id);assert.equal(out.recording.status,'finished');assert.equal(out.history[0].answer,'西瓜');assert.equal((await reloaded.list()).length,1);
+  await store.pruneFinished(Date.now()+1000);assert.equal(store.live.size,0);assert.equal(store.writes.size,0);assert.equal((await store.get(g.id)).history[0].answer,'西瓜');assert.equal((await store.list(()=>false)).length,0);
   const raw=await readFile(join(dir,g.id+'.jsonl'),'utf8'),partial=readJournal(raw+'{"type":');assert(partial.recording.warning);assert.equal(partial.recording.events.length,out.recording.events.length);await assert.rejects(store.get('../config'),/编号/);
 });
 

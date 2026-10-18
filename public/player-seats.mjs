@@ -1,4 +1,4 @@
-import {CharacterView} from './avatar-renderer.mjs';
+import {CharacterView} from './avatar-loader.mjs';
 import {seatCharacter,seatPresentation,tablePlaces} from './seat-presentation.mjs';
 import {latestSpeech,messageBody,messageLabel} from './conversation.mjs';
 import {playerModelLabel,playerLabel} from './characters.mjs';

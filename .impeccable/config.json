@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "public/online.html"
+        ],
+        "createdAt": "2026-10-18T12:53:34.416Z",
+        "reason": "Agent review: screenshots confirm a light online page; the warning reads unused legacy dark-game selectors imported from style.css."
+      },
+      {
+        "rule": "radial-halo",
+        "value": "*",
+        "files": [
+          "public/online.html"
+        ],
+        "createdAt": "2026-10-18T12:53:34.497Z",
+        "reason": "Agent review: the online page has no radial halo; the detector reads unused legacy game selectors from the shared stylesheet."
+      }
+    ]
+  }
+}

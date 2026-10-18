@@ -11,11 +11,12 @@
     "setup:avatars": "node scripts/setup-avatars.mjs"
   },
   "engines": {
-    "node": ">=22.9"
+    "node": ">=22.13"
   },
   "dependencies": {
     "@napi-rs/canvas": "0.1.100",
-    "fflate": "0.8.3"
+    "fflate": "0.8.3",
+    "ws": "8.22.0"
   },
   "description": "Multi-model AI drawing and guessing arena with Live2D avatars",
   "license": "MIT",

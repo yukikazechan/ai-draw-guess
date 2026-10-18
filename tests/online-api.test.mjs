@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {once} from 'node:events';
+import net from 'node:net';
+import WebSocket from 'ws';
+
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+async function until(fn,timeout=10000){const end=Date.now()+timeout;while(Date.now()<end){const result=await fn();if(result)return result;await wait(40);}throw new Error('等待状态更新超时。');}
+test('online accounts, admin controls, isolated rooms, WebSocket drawing, secret filtering and restart persistence',{timeout:60000},async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'draw-online-'));
+  const portServer=net.createServer();portServer.listen(0,'127.0.0.1');await once(portServer,'listening');const port=portServer.address().port;await new Promise(r=>portServer.close(r));
+  const base=`http://127.0.0.1:${port}`,sockets=[];let child,log='';
+  const start=async()=>{child=spawn(process.execPath,['server.mjs'],{cwd:new URL('..',import.meta.url),windowsHide:true,env:{...process.env,PORT:String(port),PUBLIC_ORIGIN:base,DRAW_GUESS_DATA_DIR:directory,SETUP_TOKEN:'test-setup-token',OPENROUTER_API_KEY:''},stdio:['ignore','pipe','pipe']});child.stdout.on('data',()=>{});child.stderr.on('data',b=>log+=b);await until(async()=>{try{return (await fetch(base+'/api/auth/status')).ok;}catch{return false;}},20000);};
+  const stop=async()=>{const done=once(child,'exit');child.kill();await done;};
+  const request=async(path,data,cookie='',status=200)=>{const response=await fetch(base+path,{headers:{cookie,'Content-Type':'application/json','X-Game-Request':'1',Origin:base},...(data===undefined?{}:{method:'POST',body:JSON.stringify(data)})});const value=await response.json();assert.equal(response.status,status,JSON.stringify(value));return {value,cookie:response.headers.get('set-cookie')?.split(';')[0]};};
+  const connect=async cookie=>{const ws=new WebSocket(`ws://127.0.0.1:${port}/ws/room`,{headers:{cookie,Origin:base}});ws.states=[];ws.errors=[];ws.on('message',raw=>{const data=JSON.parse(raw);if(data.type==='state')ws.states.push(data.room);else ws.errors.push(data.error);});sockets.push(ws);await once(ws,'open');await until(()=>ws.states.length);return ws;};
+  try{
+    await start();await request('/api/config',undefined,'',401);await request('/api/auth/setup',{token:'wrong'},'',403);await request('/api/auth/register',{username:'early'},'',403);
+    const setup=await request('/api/auth/setup',{token:'test-setup-token',username:'admin',name:'管理员',password:'admin-password-123'}),admin=setup.cookie;
+    await request('/api/auth/setup',{token:'test-setup-token'},'',403);
+    const selfRegistered=await request('/api/auth/register',{username:'selfplayer',name:'自行注册玩家',password:'self-register-password',role:'admin'},'',201);assert.equal(selfRegistered.value.user.role,'user');
+    const users=[];
+    for(const username of ['alice','outsider']){const result=await request('/api/admin/users',{username,name:username,password:'player-password-123'},admin,201);const login=await request('/api/auth/login',{username,password:'player-password-123'});users.push({...result.value.user,cookie:login.cookie});}
+    const [alice,outsider]=users;
+    await request('/api/config',{players:[]},alice.cookie,400);await request('/api/admin/users',undefined,alice.cookie,403);await request('/api/openrouter-key',{apiKey:'alice-only-key'},alice.cookie);await request('/api/shutdown',{},admin,403);
+    await request('/api/openrouter-key',{apiKey:'fixture-private-api-key'},admin);
+    const cfg=(await request('/api/config',undefined,alice.cookie)).value;assert(!JSON.stringify(cfg).includes('fixture-private-api-key'));
+    const fromAnotherDevice=await request('/api/auth/login',{username:'alice',password:'player-password-123'});const sameConfig=(await request('/api/config',undefined,fromAnotherDevice.cookie)).value;assert(sameConfig.openrouter.hasKey);assert(!JSON.stringify(sameConfig).includes('alice-only-key'));
+    await request('/api/admin/defaults',{category:'动物',wordLevel:'easy',rounds:1,hintMode:'none',playerIds:[],useCustomWords:true,customWords:['西瓜','自行车','熊猫','苹果']},admin);
+    const publicConfig=(await request('/api/config',undefined,alice.cookie)).value;assert.equal(publicConfig.defaults.customWordCount,4);assert(!('customWords' in publicConfig.defaults));
+    const created=(await request('/api/rooms/create',{},admin,201)).value.room;
+    await request('/api/rooms/join',{code:created.id},alice.cookie);const other=(await request('/api/rooms/create',{},outsider.cookie,201)).value.room;assert.notEqual(created.id,other.id);
+    const wa=await connect(admin),wb=await connect(alice.cookie);
+    await request('/api/rooms/start',{playerIds:[]},alice.cookie,400);
+    await request('/api/rooms/start',{playerIds:[]},admin,202);
+    const getState=async cookie=>(await request('/api/rooms/state',undefined,cookie)).value.room;
+    const sa=await until(async()=>{const r=await getState(admin);return r.game?.phase==='drawing'?r:null;}),sb=await getState(alice.cookie);
+    assert.equal((await getState(outsider.cookie)).game,null);
+    const artist=sa.game.answer?{state:sa,cookie:admin,ws:wa}:{state:sb,cookie:alice.cookie,ws:wb},guesser=sa.game.answer?{state:sb,cookie:alice.cookie,ws:wb}:{state:sa,cookie:admin,ws:wa};
+    assert(artist.state.game.answer);assert.equal(guesser.state.game.answer,null);assert(!JSON.stringify(guesser.state).includes(artist.state.game.answer));
+    const g=artist.state.game,shapes=[{type:'line',points:[[30,30],[70,70]],color:'#202633',width:5}],stamp={gameId:g.id,index:g.index,turn:g.turn};
+    guesser.ws.send(JSON.stringify({type:'drawing',...stamp,shapes}));await until(()=>guesser.ws.errors.length);assert.equal((await getState(admin)).game.shapes.length,0);
+    artist.ws.send(JSON.stringify({type:'drawing',...stamp,shapes}));await until(()=>guesser.ws.states.at(-1)?.game?.shapes.length===1);assert.equal(guesser.ws.states.at(-1).game.answer,null);
+    await request('/api/rooms/action',{...stamp,action:'draw-done',shapes},guesser.cookie,400);
+    await request('/api/rooms/action',{...stamp,action:'draw-done',shapes},artist.cookie);
+    await request('/api/rooms/action',{...stamp,action:'guess',guess:artist.state.game.answer},guesser.cookie);
+    const reveal=await until(async()=>{const r=await getState(guesser.cookie);return r.game.phase==='reveal'?r:null;});assert.equal(reveal.game.answer,artist.state.game.answer);assert.equal(reveal.game.players.find(p=>p.id!==g.artistId).guessScore,3);
+    await request('/api/rooms/action',{...stamp,action:'next'},admin);await until(async()=>(await getState(admin)).game.index===1);
+    await request('/api/rooms/leave',{},alice.cookie);assert.equal((await getState(admin)).game.phase,'finished');
+    await request('/api/recording?id='+g.id,undefined,outsider.cookie,403);const recording=(await request('/api/recording?id='+g.id,undefined,alice.cookie)).value;assert(recording.recording);
+    await request('/api/auth/guest',{code:'BADCODE1',name:'坏邀请'},'',404);
+    const guest=await request('/api/auth/guest',{code:created.id,name:'邀请来的游客'},'',201),guestId=guest.value.user.id;assert.equal(guest.value.user.role,'guest');assert.equal(guest.value.room.id,created.id);
+    await request('/api/rooms/create',{},guest.cookie,403);await request('/api/start',{},guest.cookie,403);await request('/api/admin/users',undefined,guest.cookie,403);
+    const guestMatch=(await request('/api/rooms/start',{playerIds:[]},admin,202)).value.room.game;assert.notEqual(guestMatch.phase,'idle');
+    await request('/api/rooms/action',{gameId:guestMatch.id,index:guestMatch.index,turn:guestMatch.turn,action:'finish'},admin);await request('/api/recording?id='+guestMatch.id,undefined,guest.cookie);
+    await request('/api/rooms/start',{playerIds:[]},admin,202);
+    const upgraded=await request('/api/auth/register',{username:'upgradedguest',password:'upgrade-guest-password',role:'admin'},guest.cookie,201);assert.equal(upgraded.value.user.id,guestId);assert.equal(upgraded.value.user.role,'user');
+    assert.equal((await getState(upgraded.cookie)).members.find(p=>p.id===guestId).name,'邀请来的游客');await request('/api/recording?id='+guestMatch.id,undefined,upgraded.cookie);
+    const guestLogin=await request('/api/auth/login',{username:'upgradedguest',password:'upgrade-guest-password'});assert.equal(guestLogin.value.user.id,guestId);
+    await request('/api/admin/user',{id:alice.id,active:false},admin);await request('/api/config',undefined,alice.cookie,401);
+    for(const ws of sockets)ws.terminate();await stop();await start();assert.equal((await request('/api/config',undefined,admin)).value.user.role,'admin');assert.equal((await getState(admin)),null);await request('/api/recording?id='+guestMatch.id,undefined,guestLogin.cookie);
+  }catch(e){e.message+='\nServer diagnostics: '+log;throw e;}finally{for(const ws of sockets)ws.terminate();if(child&&child.exitCode===null)await stop();await rm(directory,{recursive:true,force:true});}
+});

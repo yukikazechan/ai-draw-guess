@@ -2,21 +2,22 @@
 
 把 11 家 AI 请到同一张画桌：你画它们猜、它们画你猜，也可以一起玩画画接龙。角色有各自的性格、高清 Live2D 表情和赛后互怼。
 
-**本地运行 · 自带 API Key · 默认 OpenRouter · 中文界面**
+**在线房间 · 游客邀请 · 自行注册 · 独立私有 AI · 中文界面**
+
+本二开版本新增多用户账号和真人 + AI 房间。复制邀请链接后，朋友可填写昵称作为游客加入；游客注册后保留当前身份和对局记录。每个账号的 AI 独立，房间使用房主的 AI。配置随账号保存在服务器并加密，换手机或电脑只需登录，无需额外设备或软件。管理员提供默认题库与规则。服务器更新见 [多用户部署指南](docs/multiuser-deployment.md)，加密与安全边界见 [AI 配置安全说明](docs/ai-config-security.md)。
 
 ## 快速开始
 
-需要 **Node.js 22.9 或更新版**（推荐 24 LTS）及 npm。Windows、macOS、Linux 均可运行。
+需要 **Node.js 22.13 或更新版**（推荐 24 LTS）及 npm。Windows、macOS、Linux 均可运行。
 
 ```bash
-git clone https://github.com/kirobani/ai-draw-guess.git
-cd ai-draw-guess
+# 在本二开版本的源码目录执行
 npm ci
 npm run setup:avatars
 npm start
 ```
 
-打开 **http://127.0.0.1:3211**，进入 **AI 设置 → 统一 OpenRouter Key**，保存自己的 Key。然后选择选手与型号，点「保存并验证看图 / 绘图」；验证成功后开局。
+打开 **http://127.0.0.1:3211/online**，使用启动日志中的初始化码创建首位管理员。登录后在管理员工作台配置统一 Key、选手与型号，点「保存并验证看图 / 绘图」；验证成功后即可开局或邀请朋友。纯真人房间不需要配置 AI Key。
 
 **Live2D 还有一次安装步骤：**高清角色由 `setup:avatars` 下载（约 389 MB）；Cubism Core 由使用者从 [Live2D 官方 SDK for Web](https://www.live2d.com/en/sdk/download/web/) 下载并接受其许可后安装：
 
@@ -40,7 +41,7 @@ npm run setup:avatars -- --sdk "你的 Cubism SDK for Web 解压目录"
 
 ## 模型和接口
 
-所有角色默认独立调用对应厂商的 OpenRouter 型号，**包括 GPT**，不是同一个模型换角色扮演。型号目录来自 [OpenRouter Models API](https://openrouter.ai/api/v1/models)，可按厂商选择、手动输入 ID，并查看请求型号与平台返回的型号回执。
+以下是管理员服务器托管配置的默认型号，各角色独立调用对应模型。普通用户可在网页保存自己的接口、型号和 Key，设置按账号隔离。管理员托管型号目录来自 [OpenRouter Models API](https://openrouter.ai/api/v1/models)。
 
 | 角色 | 默认 OpenRouter 型号 |
 | --- | --- |
@@ -68,9 +69,9 @@ npm run build            # 从 TypeScript 重新构建角色渲染器
 npm run test:assets      # 安装完整角色和 Core 后，强制验证模型与运行库
 ```
 
-主要目录：`lib/` 服务端规则和模型适配，`public/` 浏览器界面，`src/` 角色驱动，`data/` 词库和目录快照，`tests/` 自动测试。没有数据库服务；设置与本地对局保存在 `.local/`。
+主要目录：`lib/` 服务端规则和模型适配，`public/` 浏览器界面，`src/` 角色驱动，`data/` 词库和目录快照，`tests/` 自动测试。账号、会话和默认配置使用 Node.js 内置 SQLite；设置与对局素材保存在 `.local/`，无需额外数据库服务。
 
-默认只监听回环地址。本项目是个人本地游戏，尚未实现公网账户、多用户权限或租户隔离，不要直接用反向代理开放成公共服务。API 会把本轮题目、画面和对话发送给你选择的模型平台；调用由你自己的账户计费。密钥以本机文件或环境变量保存，不会返回给网页；不要分享 `.local/` 或 `.env`。
+默认只监听回环地址。公网部署需配置 `PUBLIC_ORIGIN` 和 HTTPS 反向代理，并转发 WebSocket；具体步骤见部署指南。运行单个 Node.js 服务进程，房间在内存中，重启后需重新创建；账号和已保存记录保持不变。API 将题目、画面和对话发送给房主选择的模型平台，由房主的 Key 计费。个人配置用 AES-256-GCM 保存，调用时服务器解密，运维有能力读取；不要分享 `.local/` 或 `.env`。
 
 ## 许可与致谢
 

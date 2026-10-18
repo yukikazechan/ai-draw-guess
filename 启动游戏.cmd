@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 where npm >nul 2>nul
 if errorlevel 1 (
-  echo Please install Node.js 22.9+ from https://nodejs.org first.
+  echo Please install Node.js 22.13+ from https://nodejs.org first.
   pause
   exit /b 1
 )

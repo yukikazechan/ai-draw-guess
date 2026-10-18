@@ -1,4 +1,4 @@
-import {CharacterView} from './avatar-renderer.mjs';
+import {CharacterView} from './avatar-loader.mjs';
 import {CHARACTERS,CHARACTER_MAP} from './characters.mjs';
 import {characterState,focusedPlayer} from './avatar-state.mjs';
 export function createCompanion(){

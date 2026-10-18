@@ -1,16 +1,19 @@
 import http from 'node:http';
-import {existsSync} from 'node:fs';
+import {existsSync,writeFileSync,renameSync} from 'node:fs';
 import {readFile,writeFile,mkdir,rename,readdir,appendFile} from 'node:fs/promises';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {randomBytes} from 'node:crypto';
+import {OnlineServer} from './lib/online-server.mjs';
+import {publicUser} from './lib/accounts.mjs';
+import {resolveCodexPath} from './lib/codex-runtime.mjs';
+import {redactSecrets} from './lib/ai-config-store.mjs';
 import {Game} from './lib/game.mjs';
 import {RelayGame} from './lib/relay.mjs';
 import {CATEGORIES,IDIOM_LEVELS,CATEGORY_LEVELS} from './lib/words.mjs';
 import {callModel,detectCodex,DEFAULT_PLAYERS,PRESETS,publicPlayer,buildRequest,migrateConfig,getKey} from './lib/providers.mjs';
 import {CHARACTERS,CHARACTER_MAP,characterPrompt,resolveCharacter} from './public/characters.mjs';
 import {modelCatalog} from './lib/model-catalog.mjs';
-import {setSharedOpenRouterKey,hasSharedOpenRouterKey} from './lib/credentials.mjs';
+import {setSharedOpenRouterKey} from './lib/credentials.mjs';
 import {checkKey,checkCapabilities} from './lib/model-checks.mjs';
 import {modelSource,chosenEffort,validateControls,waitSeconds} from './public/reasoning.mjs';
 import {HINT_MODES,normalizeHintMode} from './public/visual-hints.mjs';
@@ -18,58 +21,73 @@ import {RecordingStore} from './lib/recording.mjs';
 import {productionFiles,characterFiles,zipFiles} from './lib/production-export.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url)),LOCAL=process.env.DRAW_GUESS_DATA_DIR||join(ROOT,'.local');
-await mkdir(LOCAL,{recursive:true});
+await mkdir(LOCAL,{recursive:true,mode:0o700});
 const recordings=new RecordingStore(join(LOCAL,'recordings'));
 const avatarAssets={core:existsSync(join(ROOT,'public/vendor/live2dcubismcore.min.js')),models:existsSync(join(ROOT,'public/models/agentkit-expressions-r3/deepseek/deepseek-expressions.model3.json'))};
 let config={version:4,players:structuredClone(DEFAULT_PLAYERS)};
 try{const x=JSON.parse(await readFile(join(LOCAL,'config.json'),'utf8'));if(Array.isArray(x.players))config=x;}catch{}
 config=migrateConfig(config);
 try{setSharedOpenRouterKey(JSON.parse(await readFile(join(LOCAL,'credentials.json'),'utf8')).openrouterApiKey);}catch{}
-await writeFile(join(LOCAL,'config.json'),JSON.stringify(config,null,2),'utf8');
-let codex=await detectCodex();
+let codex={available:false,loggedIn:false,path:null};
+resolveCodexPath().then(path=>{codex={...codex,available:!!path,path};}).catch(()=>{});
 let modelChecks={};
 try{modelChecks=JSON.parse(await readFile(join(LOCAL,'model-checks.json'),'utf8'));}catch{}
 let checkWrites=Promise.resolve();
-const publicChecks=()=>Object.fromEntries(config.players.map(p=>[p.id,modelChecks[checkKey(p)]||null]));
+const publicChecks=user=>Object.fromEntries(online.playersFor(user).map(p=>[p.id,modelChecks[checkKey(p)]||null]));
 const sessions=new Map();const PORT=Number(process.env.PORT||3211);let closing=false;
 const onDiagnostic=entry=>{appendFile(join(LOCAL,'request-diagnostics.jsonl'),JSON.stringify(entry)+'\n','utf8').catch(()=>{});};
-const run=(p,prompt,image,signal,options={})=>callModel(p,characterPrompt(p,prompt),image,signal,codex.path,{...options,onDiagnostic});
+const run=(p,prompt,image,signal,options={})=>callModel(p,characterPrompt(p,prompt),image,signal,codex.path,{...options,onDiagnostic:entry=>onDiagnostic(redactSecrets(entry,[getKey(p)]))});
 const runRelay=(p,prompt,image,signal,options={})=>run(p,prompt,image,signal,{...options,parallel:true});
+const online=new OnlineServer({directory:LOCAL,port:PORT,getConfig:()=>config,recordings,run,onRevoke:id=>{sessions.get(id)?.game?.finish();sessions.delete(id);},onLegacyMigrated:metadata=>{
+  writeFileSync(join(LOCAL,'config.tmp'),JSON.stringify(metadata,null,2),{mode:0o600});renameSync(join(LOCAL,'config.tmp'),join(LOCAL,'config.json'));
+  writeFileSync(join(LOCAL,'credentials.tmp'),JSON.stringify({migrated:true}),{mode:0o600});renameSync(join(LOCAL,'credentials.tmp'),join(LOCAL,'credentials.json'));config=metadata;
+}});
 const json=(res,data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 function session(req,res){
-  const match=(req.headers.cookie||'').match(/(?:^|;\s*)drawguess=([a-f0-9]{48})(?:;|$)/);let id=match?.[1];
-  if(!id||!sessions.has(id)){id=randomBytes(24).toString('hex');sessions.set(id,{game:null,last:Date.now()});res.setHeader('Set-Cookie',`drawguess=${id}; HttpOnly; SameSite=Strict; Path=/`);}
+  const id=req.user.id;if(!sessions.has(id))sessions.set(id,{game:null,last:Date.now()});
   const s=sessions.get(id);s.last=Date.now();return s;
 }
 async function body(req){let chunks=[],size=0;for await(const c of req){size+=c.length;if(size>4_000_000)throw new Error('请求太大。');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new Error('请求格式无效。');}}
 function launch(g,fn){Promise.resolve().then(fn).catch(e=>{if(!g.aborted){g.notice=e.message;g.touch();}});}
 const allowedFiles=new Map([['/','index.html'],...['index.html','app.mjs','relay-view.mjs','relay.css','model-picker.mjs','reasoning.mjs','guess-confidence.mjs','drawing.mjs','visual-hints.mjs','drawing-playback.mjs','characters.mjs','characters.html','characters-review.mjs','style.css','fonts.css','help.html','avatar.html','avatar.css','avatar-preview.mjs','avatar-game.mjs','player-seats.mjs','conversation.mjs','panel-drawer.mjs','seat-presentation.mjs','avatar-state.mjs','avatar-renderer.mjs'].map(f=>['/'+f,f])]);
 for(const file of ['production.html','production.css','production.mjs','production-player.mjs','recording-client.mjs','banter-view.mjs'])allowedFiles.set('/'+file,file);
+for(const file of ['online.html','online.css','online.mjs'])allowedFiles.set('/'+file,file);
+allowedFiles.set('/avatar-loader.mjs','avatar-loader.mjs');
+allowedFiles.set('/online','online.html');
 const types={html:'text/html; charset=utf-8',mjs:'text/javascript; charset=utf-8',js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json; charset=utf-8',png:'image/png',moc3:'application/octet-stream',vert:'text/plain; charset=utf-8',frag:'text/plain; charset=utf-8',ttf:'font/ttf',txt:'text/plain; charset=utf-8'};
 // Only explicitly published runtime assets are served; never follow symlinks or expose .local/source files.
 async function registerAssets(dir){for(const item of await readdir(join(ROOT,'public',dir),{withFileTypes:true})){const file=dir+'/'+item.name;if(item.isDirectory())await registerAssets(file);else if(item.isFile()&&types[item.name.split('.').pop()])allowedFiles.set('/'+file,file);}}
 await registerAssets('vendor');await registerAssets('models');await registerAssets('fonts');
 const server=http.createServer(async(req,res)=>{
   try {
-    const host=req.headers.host;if(![`127.0.0.1:${PORT}`,`localhost:${PORT}`,`[::1]:${PORT}`].includes(host))return json(res,{error:'只接受本机访问。'},403);
+    const host=req.headers.host;if(!online.hosts.has(host))return json(res,{error:'站点地址未获授权，请配置 PUBLIC_ORIGIN。'},403);
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
-    res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    const socketOrigins=[...online.origins].map(origin=>origin.replace(/^http/,'ws')).join(' ');
+    res.setHeader('Content-Security-Policy',`default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${socketOrigins}; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     const url=new URL(req.url,'http://'+host),path=url.pathname;
+    req.user=online.accounts.authenticate(req);
+    if(req.method==='GET'&&['/','/index.html'].includes(path)&&(!req.user||req.user.role==='guest')){res.writeHead(302,{Location:'/online'});return res.end();}
     if(req.method==='GET'&&allowedFiles.has(path)){const file=allowedFiles.get(path);res.writeHead(200,{'Content-Type':types[file.split('.').pop()],'Cache-Control':'no-cache'});return res.end(await readFile(join(ROOT,'public',file)));}
     if(!path.startsWith('/api/'))return json(res,{error:'未找到。'},404);
     if(req.method==='POST') {
       if(req.headers['x-game-request']!=='1'||!req.headers['content-type']?.includes('application/json'))return json(res,{error:'请求来源无效。'},403);
-      if(req.headers.origin&&req.headers.origin!==`http://${host}`)return json(res,{error:'不接受跨站请求。'},403);
+      if(req.headers.origin&&!online.origins.has(req.headers.origin))return json(res,{error:'不接受跨站请求。'},403);
     }
+    if(await online.handle(req,res,path,{body,json}))return;
     const s=session(req,res);
     if(req.method==='GET'&&path==='/api/health')return json(res,{app:'draw-guess-arena',version:'2.9.1',drawingFormatRepair:true,postRoundBanter:true,characterVoices:1,recordingVersion:2,randomTurnOrder:true,visualHintGuidance:2,lobbyCharacterPreparation:true,categoryDifficulties:true,relayExactPass:true,relayCategoryHints:true,relayShowcase:true,hintModes:HINT_MODES.map(item=>item.id),kitExpressions:9,confidenceExpressions:true,port:PORT,freeHints:true,expandablePanels:true,codexAutoLocate:true,reasoningControls:true,concurrency:12});
-    if(req.method==='GET'&&path==='/api/config'){codex=await detectCodex();return json(res,{players:config.players.map(publicPlayer),checks:publicChecks(),avatarAssets,openrouter:{hasKey:hasSharedOpenRouterKey()},presets:PRESETS,characters:CHARACTERS,categories:CATEGORIES,idiomLevels:IDIOM_LEVELS,categoryLevels:CATEGORY_LEVELS,hintModes:HINT_MODES,relayShowcase:true,randomTurnOrder:true,recordingVersion:2,codex:{available:codex.available,loggedIn:codex.loggedIn}});}
-    if(req.method==='GET'&&path==='/api/models')return json(res,await modelCatalog());
+    if(req.method==='GET'&&path==='/api/config'){
+      const adminScope=url.searchParams.get('scope')==='admin';if(adminScope&&req.user.role!=='admin')return json(res,{error:'需要管理员权限。'},403);
+      const ownConfig=online.profiles.get(req.user);
+      return json(res,{user:publicUser(req.user),defaults:online.defaults(req.user),players:online.publicPlayers(req.user),checks:publicChecks(req.user),avatarAssets,openrouter:{hasKey:!!ownConfig.openrouterApiKey},presets:req.user.role==='admin'?PRESETS:Object.fromEntries(Object.entries(PRESETS).filter(([id])=>id!=='codex')),characters:CHARACTERS,categories:CATEGORIES,idiomLevels:IDIOM_LEVELS,categoryLevels:CATEGORY_LEVELS,hintModes:HINT_MODES,relayShowcase:true,randomTurnOrder:true,recordingVersion:2,encryption:{enabled:true,operatorCanDecrypt:true},codex:{available:req.user.role==='admin'&&codex.available,loggedIn:req.user.role==='admin'&&codex.loggedIn}});
+    }
+    if(req.method==='GET'&&path==='/api/models'){const catalog=await modelCatalog();return json(res,req.user.role==='admin'?catalog:{...catalog,models:catalog.models.filter(m=>m.source!=='codex')});}
     if(req.method==='GET'&&path==='/api/state')return json(res,{game:s.game?{...s.game.snapshot(),recordingEnabled:!!s.game.recording,recordingWarning:s.game.recording?.persistenceError||''}:null});
-    if(req.method==='GET'&&path==='/api/recordings')return json(res,{recordings:await recordings.list()});
-    if(req.method==='GET'&&path==='/api/recording')return json(res,await recordings.get(url.searchParams.get('id')||''));
+    if(req.method==='GET'&&path==='/api/recordings')return json(res,{recordings:await recordings.list(id=>online.accounts.canRead(id,req.user))});
+    if(req.method==='GET'&&path==='/api/recording'){const id=url.searchParams.get('id')||'';if(!online.accounts.canRead(id,req.user))return json(res,{error:'无权读取该记录。'},403);return json(res,await recordings.get(id));}
     if(req.method==='GET'&&['/api/production','/api/characters'].includes(path)){
       const id=url.searchParams.get('id')||s.game?.id;if(!id)throw new Error('先完成一场比赛，再下载素材。');
+      if(!online.accounts.canRead(id,req.user))return json(res,{error:'无权读取该记录。'},403);
       const data=await recordings.get(id),files=await (path==='/api/production'?productionFiles:characterFiles)(data,join(ROOT,'public'));
       const zip=zipFiles(files);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':zip.length,'Cache-Control':'no-store','Content-Disposition':`attachment; filename="draw-guess-${path==='/api/production'?'production':'characters'}-${id}.zip"`});return res.end(zip);
     }
@@ -88,28 +106,28 @@ const server=http.createServer(async(req,res)=>{
     if(path==='/api/openrouter-key'){
       const key=String(data.apiKey||'').trim();
       if(!data.clear&&(!key||key.length>1000))throw new Error('请填写有效的 OpenRouter Key。');
-      await writeFile(join(LOCAL,'credentials.tmp'),JSON.stringify({openrouterApiKey:data.clear?'':key}),{encoding:'utf8',mode:0o600});
-      await rename(join(LOCAL,'credentials.tmp'),join(LOCAL,'credentials.json'));
-      setSharedOpenRouterKey(data.clear?'':key);
-      return json(res,{ok:true,hasKey:hasSharedOpenRouterKey(),players:config.players.map(publicPlayer)});
+      const ownConfig=online.profiles.get(req.user);ownConfig.openrouterApiKey=data.clear?'':key;online.profiles.save(req.user.id,ownConfig);
+      return json(res,{ok:true,hasKey:!!ownConfig.openrouterApiKey,players:online.publicPlayers(req.user)});
     }
     if(path==='/api/config') {
       if(!Array.isArray(data.players)||data.players.length>12||data.players.length<1)throw new Error('请保留 1–12 位 AI。');
       const catalog=await modelCatalog();
+      const config=online.profiles.get(req.user);
       const ids=new Set();
       const players=data.players.map((p,i)=>{
         if(!/^[a-zA-Z0-9_-]{1,40}$/.test(p.id)||ids.has(p.id)||p.id==='human')throw new Error('选手标识无效。');ids.add(p.id);
         if(!PRESETS[p.provider])throw new Error('接口类型无效。');
+        if(p.provider==='codex'&&req.user.role!=='admin')throw new Error('普通用户只能配置 API 选手，不能调用服务器上的 Codex。');
         if(typeof p.name!=='string'||!p.name.trim()||p.name.length>40)throw new Error('选手名称须为 1–40 字。');
         if(typeof p.model!=='string'||p.model.length>160||!p.model.trim())throw new Error('请填写模型 ID。');
         const old=config.players.find(x=>x.id===p.id);
         const baseUrl=String(p.baseUrl||'').trim();
         const sameDestination=old?.provider===p.provider&&(old?.baseUrl||'')===baseUrl;
-        const item={id:p.id,name:p.name.trim(),provider:p.provider,model:p.model.trim(),baseUrl,enabled:!!p.enabled,color:/^#[a-f0-9]{6}$/i.test(p.color)?p.color:DEFAULT_PLAYERS[i%5].color,apiKey:p.clearKey?'':String(p.apiKey||(sameDestination?old?.apiKey:'')||'').trim()};
+        const item={id:p.id,name:p.name.trim(),provider:p.provider,model:p.model.trim(),baseUrl,enabled:!!p.enabled,color:/^#[a-f0-9]{6}$/i.test(p.color)?p.color:DEFAULT_PLAYERS[i%5].color,credentialScope:'private',apiKey:p.clearKey?'':String(p.apiKey||(sameDestination?old?.apiKey:'')||'').trim()};
         if(p.keySource&&!p.apiKey&&!p.clearKey){
           const destinations={qwen:'https://maas.qianwenaiapi.com/compatible-mode/v1',openrouter:'https://openrouter.ai/api/v1'};
           if(!['compatible','openrouter'].includes(item.provider)||item.baseUrl!==destinations[p.keySource])throw new Error('只能在同一平台的正式接口内复用密钥。');
-          const donor=config.players.find(x=>modelSource(x)===p.keySource&&getKey(x));
+          const donor=online.playersFor(req.user).find(x=>modelSource(x)===p.keySource&&getKey(x));
           if(!donor)throw new Error('本机还没有保存此平台的密钥，请在接入与密钥设置中填写。');
           item.apiKey=getKey(donor);
         }
@@ -123,17 +141,18 @@ const server=http.createServer(async(req,res)=>{
         if(p.characterId&&!CHARACTER_MAP[p.characterId]&&p.characterId!=='none')throw new Error('角色选择无效。');
         item.characterId=p.characterId||resolveCharacter(item)?.id||'none';
         if(p.provider!=='codex'&&(item.baseUrl||item.enabled||item.apiKey))buildRequest(item,'test',null,profile);
+        if(req.user.role!=='admin'&&(item.baseUrl||item.enabled||item.apiKey)&&new URL(item.baseUrl||PRESETS[item.provider].baseUrl).protocol!=='https:')throw new Error('普通用户的模型接口必须使用公网 HTTPS 地址。');
         return item;
       });
-      await writeFile(join(LOCAL,'config.tmp'),JSON.stringify({version:4,players},null,2),'utf8');await rename(join(LOCAL,'config.tmp'),join(LOCAL,'config.json'));config={version:4,players};
-      return json(res,{ok:true,players:players.map(publicPlayer),checks:publicChecks()});
+      online.profiles.save(req.user.id,{...config,version:4,players});
+      return json(res,{ok:true,players:online.publicPlayers(req.user),checks:publicChecks(req.user)});
     }
     if(path==='/api/test'){
-      const p=config.players.find(p=>p.id===data.id);if(!p)throw new Error('选手不存在。');
+      const p=online.playersFor(req.user).find(p=>p.id===data.id);if(!p)throw new Error('选手不存在。');
       if(s.testing)throw new Error('连接测试正在进行。');s.testing=true;
       try{
         const image='data:image/png;base64,'+(await readFile(join(ROOT,'lib','vision-check.png'))).toString('base64');
-        const result=await checkCapabilities(p,run,image);
+        const result=await checkCapabilities(p,online.userRun(req.user),image);
         modelChecks[checkKey(p)]=result;
         checkWrites=checkWrites.catch(()=>{}).then(async()=>{await writeFile(join(LOCAL,'model-checks.tmp'),JSON.stringify(modelChecks,null,2),'utf8');await rename(join(LOCAL,'model-checks.tmp'),join(LOCAL,'model-checks.json'));});
         await checkWrites;return json(res,result);
@@ -141,7 +160,8 @@ const server=http.createServer(async(req,res)=>{
     }
     if(path==='/api/start') {
       if(!Array.isArray(data.playerIds)||new Set(data.playerIds).size!==data.playerIds.length)throw new Error('选手列表无效。');
-      const players=data.playerIds.map(id=>config.players.find(p=>p.id===id));
+      const ownPlayers=online.playersFor(req.user);
+      const players=data.playerIds.map(id=>ownPlayers.find(p=>p.id===id));
       if(players.some(p=>!p))throw new Error('选手不存在。');
       if(![1,2,3,5].includes(data.rounds))throw new Error('每人题数无效。');
       if(!CATEGORIES.some(c=>c.name===data.category))throw new Error('请选择题目分类。');
@@ -150,7 +170,10 @@ const server=http.createServer(async(req,res)=>{
       if(!['duel','battle','relay'].includes(data.mode))throw new Error('游戏模式无效。');
       if(data.banter!==undefined&&typeof data.banter!=='boolean')throw new Error('互怼开关无效。');
       const options={players:structuredClone(players),human:data.human!==false,rounds:data.rounds,category:data.category,idiomLevel:data.idiomLevel,wordLevel:data.wordLevel??data.idiomLevel??'easy',hintMode:normalizeHintMode(data.hintMode),mode:data.mode,banter:data.banter!==false};
-      const game=data.mode==='relay'?new RelayGame({...options,run:runRelay}):new Game({...options,run});
+      const context={category:options.category};
+      const game=data.mode==='relay'?new RelayGame({...options,run:online.userRun(req.user,runRelay,context)}):new Game({...options,run:online.userRun(req.user,run,context)});
+      context.matchId=game.id;
+      online.accounts.charge(req.user.id,'matches');online.accounts.own(game.id,req.user.id);
       s.game?.finish();s.game=game;recordings.attach(game,{secrets:game.players.map(getKey)});launch(game,()=>game.next());return json(res,{ok:true,id:game.id},202);
     }
     if(path==='/api/action') {
@@ -203,8 +226,9 @@ const server=http.createServer(async(req,res)=>{
   }catch(e){if(!res.headersSent)json(res,{error:e.message||'操作失败，请重试。'},400);else res.end();}
 });
 server.requestTimeout=240000;
-server.listen(PORT,'127.0.0.1',()=>console.log(`你画我猜 AI 大乱斗： http://127.0.0.1:${PORT}\nCodex：${codex.loggedIn?'已登录':codex.available?'已安装，需登录':'未安装，可使用 API'}\n按 Ctrl+C 关闭服务。`));
+online.attach(server);
+server.listen(PORT,process.env.BIND_HOST||'127.0.0.1',()=>console.log(`你画我猜： ${online.origin.origin}/online\n按 Ctrl+C 关闭服务。`));
 server.on('error',e=>{console.error(e.code==='EADDRINUSE'?`端口 ${PORT} 已被占用；如果游戏已启动，请直接打开浏览器。`:e.message);process.exitCode=1;});
-function shutdown(){if(closing)return;closing=true;for(const s of sessions.values())s.game?.finish();server.close();recordings.flush().finally(()=>process.exit());setTimeout(()=>process.exit(),10000).unref();}
+function shutdown(){if(closing)return;closing=true;online.close();for(const s of sessions.values())s.game?.finish();server.close();recordings.flush().finally(()=>{online.accounts.close();process.exit();});setTimeout(()=>process.exit(),10000).unref();}
 process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
 setInterval(()=>{for(const [id,s] of sessions)if(Date.now()-s.last>24*3600e3){s.game?.finish();sessions.delete(id);}},3600000).unref();
