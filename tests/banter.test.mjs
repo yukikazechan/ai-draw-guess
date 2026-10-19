@@ -110,3 +110,13 @@ test('主动互怼的迟到 AI 回应不能污染下一题或跳过后的聊天'
  b.stop();resolve({line:'迟到的回复'});await pending;
  assert.equal(messages.length,1);assert.equal(messages[0].source,'human');assert.equal(b.status,'skipped');
 });
+
+test('@ 真人会等待本人回嘴，双方都作为真人消息记录且不调用 AI',async()=>{
+ let calls=0;const messages=[],roster=[...players,{id:'friend',name:'朋友',human:true}],b=make({players:roster,pairs:[],run:async()=>{calls++;return {line:'不应调用'};},publish:m=>messages.push(m)});
+ await b.challenge({banterId:b.id,targetId:'friend',text:'你把伞看成降落伞也太离谱了！'},'human');
+ assert.equal(b.status,'waiting-human');assert.equal(calls,0);assert.equal(messages[0].source,'human');assert.equal(messages[0].targetId,'friend');
+ const game={phase:'reveal',players:roster,banterEnabled:true,banter:b.snapshot()};
+ assert(banterComposerMarkup(game,'friend').includes('data-banter-form'));assert(banterComposerMarkup(game,'human').includes('@朋友 · 真人'));
+ await b.reply({banterId:b.id,exchangeId:b.exchanges[0].id,text:'那明明是你画了两根长绳！'});
+ assert.equal(b.status,'complete');assert.equal(calls,0);assert.equal(messages.length,2);assert.equal(messages[1].source,'human');assert.equal(messages[1].targetId,'human');
+});

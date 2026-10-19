@@ -184,7 +184,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(path==='/api/action') {
       const g=s.game;if(!g||g.id!==data.gameId)throw new Error('比赛已变更，请刷新页面。');
-      if(data.action==='banter-challenge'){g.challengeAI(data);return json(res,{ok:true});}
+      if(data.action==='banter-challenge'){g.challengePlayer(data);return json(res,{ok:true});}
       if(['banter-reply','banter-retry','banter-skip'].includes(data.action)){
         const b=g.mode==='relay'&&g.showcase?.status==='result'?g.showcase.banter:g.phase==='reveal'?g.banter:null;
         if(!b)throw new Error('当前没有互怼环节。');b.check(data);

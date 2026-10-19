@@ -87,6 +87,9 @@ body.arena-board{background:#edf2f8}
 .arena-board .action-panel p{font-size:14px;line-height:1.75;color:#455773}
 .arena-board .action-panel .guess-form{display:flex;gap:8px;max-width:none}
 .arena-board .action-panel .guess-form input{flex:1;min-width:0}
+.action-panel #guessForm{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;width:100%;max-width:100%;min-width:0}
+.action-panel #guessForm>input{width:100%;max-width:100%;min-width:0;min-height:44px}
+.action-panel #guessForm>.primary{width:auto;margin:0;justify-self:start}
 .arena-board .action-panel .button-row{margin-top:10px}
 .arena-board .match-chat{margin:0;box-shadow:none;border-radius:14px;min-height:180px}
 .arena-board .match-chat .chat-heading{padding:10px 12px;flex-wrap:wrap;gap:8px;background:#e7eef8}
@@ -203,6 +206,12 @@ dialog.panel-drawer[data-active-panel=chat]{width:min(1080px,94vw);height:min(78
 .panel-drawer .action-panel .guess-form .guess-pass{font-size:14px!important}
 #mobileGuessForm .guess-pass{min-height:34px;padding:7px 8px;font-size:13px;border-color:transparent;background:transparent;color:#58677f;flex:none;white-space:nowrap}
 #mobileGuessForm .primary{min-width:90px;flex:none}
+@media(max-width:560px){
+  .action-panel #guessForm{grid-template-columns:minmax(0,1fr) auto}
+  .action-panel #guessForm>input{grid-column:1/-1}
+  .action-panel #guessForm>.guess-submit{grid-column:1}
+  .action-panel #guessForm>.guess-pass{grid-column:2}
+}
 @media(max-width:800px){
   .room-mode:not(.arena-board) .room-bar{padding:18px 16px}
   .room-member-heading{margin-top:18px;flex-wrap:wrap;gap:6px 12px}

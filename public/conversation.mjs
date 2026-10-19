@@ -26,7 +26,7 @@ export function recapMarkup(recap){
 }
 export function createConversation(panel){
   const log=panel.querySelector('.chat-log'),filter=panel.querySelector('select'),follow=panel.querySelector('input'),newButton=panel.querySelector('.chat-new'),count=panel.querySelector('.chat-count');
-  let gameId=null,messages=[],key='',filterKey='',nodes=new Map(),rendering=false;
+  let gameId=null,messages=[],key='',filterKey='',nodes=new Map(),rendering=false,userScrolling=false,scrollIntentTimer;
   function render(){
     const nextKey=JSON.stringify(messages);if(nextKey===key&&filterKey===filter.value)return;
     const oldIds=new Set(nodes.keys()),oldScroll=log.scrollTop,top=log.getBoundingClientRect().top;
@@ -57,12 +57,16 @@ export function createConversation(panel){
   filter.onchange=()=>render();
   follow.onchange=()=>{if(follow.checked){log.scrollTop=log.scrollHeight;newButton.hidden=true;}};
   newButton.onclick=()=>{follow.checked=true;follow.onchange();};
-  log.addEventListener('scroll',()=>{if(!rendering){follow.checked=log.scrollHeight-log.scrollTop-log.clientHeight<24;if(follow.checked)newButton.hidden=true;}});
+  const noteScrollIntent=()=>{userScrolling=true;clearTimeout(scrollIntentTimer);scrollIntentTimer=setTimeout(()=>{userScrolling=false;},1500);};
+  log.addEventListener('wheel',noteScrollIntent,{passive:true});log.addEventListener('touchmove',noteScrollIntent,{passive:true});log.addEventListener('pointerdown',noteScrollIntent,{passive:true});
+  log.addEventListener('pointermove',event=>{if(event.buttons)noteScrollIntent();},{passive:true});
+  log.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))noteScrollIntent();});
+  log.addEventListener('scroll',()=>{if(!rendering&&userScrolling){follow.checked=log.scrollHeight-log.scrollTop-log.clientHeight<24;if(follow.checked)newButton.hidden=true;clearTimeout(scrollIntentTimer);scrollIntentTimer=setTimeout(()=>{userScrolling=false;},200);}});
   log.addEventListener('toggle',event=>{if(event.target.matches('details'))follow.checked=false;},true);
   const keepLatest=()=>{if(follow.checked){log.scrollTop=log.scrollHeight;newButton.hidden=true;}};
   const resize=new ResizeObserver(keepLatest);resize.observe(log);
   document.fonts?.ready.then(keepLatest);
-  addEventListener('pagehide',()=>resize.disconnect(),{once:true});
+  addEventListener('pagehide',()=>{resize.disconnect();clearTimeout(scrollIntentTimer);},{once:true});
   function update(game){
     panel.hidden=!game;if(!game)return;
     if(gameId!==game.id){gameId=game.id;nodes.clear();log.replaceChildren();key='';filterKey='';filter.value='all';follow.checked=true;newButton.hidden=true;}

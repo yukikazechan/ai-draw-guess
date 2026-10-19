@@ -42,7 +42,7 @@ const conversation=createConversation($('conversationPanel'));
 const banterComposer=document.createElement('div');banterComposer.className='banter-composer';banterComposer.hidden=true;$('conversationPanel').insertBefore(banterComposer,$('conversationPanel').querySelector('footer'));bindBanterControls(banterComposer,act);
 const mobileRoster=createMobileRoster({container:$('guessers'),section:$('mobileRoster'),home:document.querySelector('.play-sidebar')});
 bindBanterControls($('actionPanel'),act);bindBanterControls($('results'),act);
-document.querySelector('.final-setup').insertAdjacentHTML('beforebegin','<div class="setup-row banter-setting"><span class="row-label">赛后互动</span><div><label class="check"><input type="checkbox" id="banterEnabled" checked> 开启赛后互怼</label><p class="hint-mode-help">答案揭晓后，AI 可能根据真实作答点名；你也可以在聊天里 @ AI 发起互怼。自动最多两组，可随时跳过。</p></div></div>');
+document.querySelector('.final-setup').insertAdjacentHTML('beforebegin','<div class="setup-row banter-setting"><span class="row-label">赛后互动</span><div><label class="check"><input type="checkbox" id="banterEnabled" checked> 开启赛后互怼</label><p class="hint-mode-help">答案揭晓后，AI 可能根据真实作答点名；你也可以在聊天里 @ 选手发起互怼。自动最多两组，可随时跳过。</p></div></div>');
 try{$('banterEnabled').checked=localStorage.getItem('drawguess.banter')!=='false';}catch{}
 $('banterEnabled').onchange=()=>{try{localStorage.setItem('drawguess.banter',String($('banterEnabled').checked));}catch{}};
 const banterFilter=document.createElement('option');banterFilter.value='banter';banterFilter.textContent='互怼与回应';$('conversationPanel').querySelector('select').append(banterFilter);
@@ -245,7 +245,7 @@ function renderBanterComposer(){
   const draft=captureBanterDraft(banterComposer);banterComposer.innerHTML=markup;banterComposer.hidden=!markup;restoreBanterDraft(banterComposer,draft);
   if(!connected)for(const button of banterComposer.querySelectorAll('button'))button.disabled=true;
 }
-function banterEntry(){return game?.banterEnabled&&game?.players.some(p=>p.id===myId()&&p.human)&&game.players.some(p=>!p.human)?'<button class="quiet" data-action="open-banter">@ AI 发起互怼</button>':'';}
+function banterEntry(){return game?.banterEnabled&&game?.players.some(p=>p.id===myId()&&p.human)?'<button class="quiet" data-action="open-banter">@ 选手发起互怼</button>':'';}
 function updateCountdown(){
   const timer=$('roundTimer'),clock=game?.clock,active=isRoom()&&clock&&game.phase!=='finished';timer.hidden=!active;if(!active)return;
   const offset=clock.serverNow-(game.clockReceivedAt||Date.now());
@@ -275,7 +275,7 @@ function updateMobileControls(){
   for(const element of $('mobileGuessForm').elements)element.disabled=inFlight>0||!connected;
   const hint=[g.myHint&&'只给你：'+g.myHint,g.hint&&'公开提示：'+g.hint].filter(Boolean).join('\n');
   $('mobileHint').hidden=!hint;$('mobileHintText').textContent=hint;
-  $('mobileAction').textContent=g.phase==='reveal'&&g.banterEnabled?'@ AI / 互动':g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
+  $('mobileAction').textContent=g.phase==='reveal'&&g.banterEnabled?'@ 选手 / 互动':g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
 }
 function renderRelay(){
   const g=game,task=g.relay.myTask,drawable=canDraw();
@@ -378,7 +378,7 @@ function roomBanterMarkup(b){
   const current=b.exchanges[b.index],canReply=b.status==='waiting-human'&&current?.toId===myId();
   const node=document.createElement('div');node.innerHTML=banterMarkup(b);
   if(!canReply)node.querySelector('[data-banter-form]')?.remove();
-  if(!isHost())for(const button of node.querySelectorAll('[data-banter-action]'))button.remove();
+  if(!isHost()&&!(current?.manual&&current.fromId===myId()))for(const button of node.querySelectorAll('[data-banter-action]'))button.remove();
   if(b.status==='waiting-human'&&!canReply)node.querySelector('.banter-status').textContent=`等待 ${current?.toName||'玩家'} 回应 ${current?.fromName||'对方'}。`;
   return node.innerHTML+banterEntry();
 }
