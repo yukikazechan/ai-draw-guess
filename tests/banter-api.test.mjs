@@ -45,6 +45,7 @@ test('room @AI uses the host compatible API, records both sides, rejects imperso
     fixture.setFailBanter(false);
     await request('/api/rooms/action',{...stamp,action:'banter-retry',banterId},guest.cookie);
     game=await until(async()=>{const s=await state(host);return s.banter.status==='complete'?s:null;});assert.equal(game.banter.exchanges.length,2);assert(game.banter.exchanges.at(-1).reply);
+    const retried=fixture.calls.filter(c=>c.purpose==='banter').at(-1);assert(retried.prompt.includes(message));assert(retried.prompt.includes(exchange.reply));
     const done=new Set(game.conversation.filter(m=>m.kind==='banter').map(m=>m.id));assert.equal(done.size,4);
     const beforeHumanMessages=fixture.calls.length;
     await request('/api/rooms/action',{...stamp,action:'banter-challenge',banterId,targetId:actor,text:'@真人，这幅画你有什么想说的？'},host);
@@ -55,6 +56,10 @@ test('room @AI uses the host compatible API, records both sides, rejects imperso
     game=await until(async()=>{const s=await state(host);return s.banter.status==='complete'?s:null;});
     assert.equal(fixture.calls.length,beforeHumanMessages);assert.equal(game.banter.exchanges.at(-1).reply,'我本人觉得这两颗果子挺明显的。');
     assert.equal(game.conversation.filter(m=>m.kind==='banter'&&m.source==='human').length,4);
+    await request('/api/rooms/action',{...stamp,action:'banter-challenge',banterId,targetId:player.id,text:'第三次，接着刚才的解释说。'},guest.cookie);
+    game=await until(async()=>{const s=await state(host);return s.banter.status==='complete'?s:null;});
+    const continued=fixture.calls.filter(c=>c.purpose==='banter').at(-1).prompt;
+    for(const text of [message,exchange.reply,'这次回应失败也别把消息吞掉。','我本人觉得这两颗果子挺明显的。','第三次，接着刚才的解释说。'])assert(continued.includes(text));
     await request('/api/rooms/action',{...stamp,action:'finish'},host);
     const third=await request('/api/auth/guest',{code:room.id,name:'另一玩家'},'',201);
     await request('/api/admin/defaults',{category:'动物',wordLevel:'easy',rounds:1,hintMode:'none',playerIds:[player.id],useCustomWords:true,customWords:['秘密甲','秘密乙','秘密丙','秘密丁']},host);

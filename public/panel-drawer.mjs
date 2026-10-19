@@ -37,9 +37,9 @@ export function createPanelDrawer(){
   chat.querySelector('.chat-heading').append(button('chat','展开聊天 ↑'));
   function ensureActionButton(){if(!action.querySelector('.panel-expand'))action.prepend(button('action','展开作答 ↑'));}
   new MutationObserver(ensureActionButton).observe(action,{childList:true});ensureActionButton();
-  return {update(game){
+  return {update(game,{chatAvailable=false}={}){
     if(dialog.open)refreshPreview();
     actionTab.hidden=!game||game.phase==='finished';
-    if(dialog.open&&(!game||current===action&&game.phase==='finished')){restore();dialog.close();}
+    if(dialog.open&&(!game&&!chatAvailable||current===action&&(!game||game.phase==='finished'))){restore();dialog.close();}
   }};
 }

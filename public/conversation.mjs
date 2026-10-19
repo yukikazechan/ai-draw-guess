@@ -3,6 +3,7 @@ export const escapeText=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 const esc=escapeText;
 export const matchNote=match=>({'idiom-order':'四个字齐全，顺序不同也算对','idiom-three':'三个字位置正确，也算对'})[match]||'';
 export function messageLabel(message){
+  if(message.kind==='chat')return message.spectator?'房间聊天 · 观战':'房间聊天';
   if(message.kind==='forfeit')return '超时判分';
   if(message.kind==='guess'&&message.timedOut)return '作答超时';
   if(message.kind==='banter')return `${message.reply?'回嘴':'互怼'} → ${message.targetName||'对方'}`;
@@ -39,7 +40,7 @@ export function createConversation(panel){
     for(const m of visible){
       let node=nodes.get(m.id);
       if(!node){node=document.createElement('article');node.className=`chat-message chat-${m.kind}`;node.dataset.messageId=m.id;node.style.setProperty('--speaker',/^#[0-9a-f]{6}$/i.test(m.color||'')?m.color:'#67738f');
-        node.innerHTML=`<header><span class="chat-round">第 ${(m.chainIndex??m.index)+1} ${m.chainIndex!=null?'条链':m.mode==='relay'?'棒':'题'}${['guess','hint'].includes(m.kind)?` · 第 ${m.turn} 轮`:''}</span><strong>${esc(m.name)}</strong>${m.model?`<small class="chat-model">${esc(m.model)}</small>`:''}<span class="chat-kind">${esc(messageLabel(m))}</span></header>${messageBody(m)}`;nodes.set(m.id,node);
+        node.innerHTML=`<header><span class="chat-round">${m.kind==='chat'?'房间':`第 ${(m.chainIndex??m.index)+1} ${m.chainIndex!=null?'条链':m.mode==='relay'?'棒':'题'}`}${['guess','hint'].includes(m.kind)?` · 第 ${m.turn} 轮`:''}</span><strong>${esc(m.name)}</strong>${m.model?`<small class="chat-model">${esc(m.model)}</small>`:''}<span class="chat-kind">${esc(messageLabel(m))}</span></header>${messageBody(m)}`;nodes.set(m.id,node);
       }
       // Previously private messages may be revealed later: insert them at their original place.
       const expected=previous?previous.nextElementSibling:log.firstElementChild;if(node!==expected)log.insertBefore(node,expected);previous=node;

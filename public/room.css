@@ -11,6 +11,14 @@
 .room-join-row input{flex:1;min-width:140px;text-transform:uppercase}
 .room-entry a{text-decoration:underline;text-underline-offset:4px}
 #roomEntryStatus{min-height:1.8em;overflow-wrap:anywhere}
+.room-entry #roomEntryStatus.error-message{color:#a92340}
+.room-chat-composer{flex:none;padding:12px 16px;border-top:1px solid #cbd7e8;background:#f7faff}
+.room-chat-composer>label{display:block;font-size:14px;font-weight:700;color:#344465;margin-bottom:8px}
+.room-chat-composer>div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
+.room-chat-composer input{min-width:0;width:100%;font-size:16px;padding:10px}
+.room-chat-composer button{min-height:44px;padding:10px 16px;white-space:nowrap}
+.room-chat-composer>small{display:block;color:#58677f;font-size:14px;line-height:1.6;margin-top:6px;overflow-wrap:anywhere}
+.room-chat-composer:focus-within{background:#eef3fc}
 .room-bar{border-bottom:1px solid var(--line);padding:0 0 18px;margin-bottom:24px}
 .room-bar-heading{display:flex;justify-content:space-between;align-items:center;gap:18px}
 .room-bar h2{font-size:22px;margin:0}
