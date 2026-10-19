@@ -12,6 +12,7 @@ import {relayActionMarkup,relayStageMarkup,renderRelayResults} from './relay-vie
 import {createRelayShowcase} from './relay-view.mjs';
 import {banterMarkup,banterPending,banterComposerMarkup,bindBanterControls,captureBanterDraft,restoreBanterDraft} from './banter-view.mjs';
 import {createRoomClient} from './room-client.mjs';
+import {roomComposerState,roomMessageAction} from './room-composer.mjs';
 import {createMobileRoster} from './mobile-roster.mjs';
 
 const $=id=>document.getElementById(id);
@@ -20,7 +21,8 @@ let config=null,game=null,mode='battle',human=true,category='成语',idiomLevel=
 let canvasKey='',actionKey='',resultKey='',animation=0,animating=false,inFlight=0,autoSent='',toastTimer,polling=false,online=true;
 let modelCatalog=null,actionDraftScope='',hintMode='visual';
 let productionTrace=null,bucket=false,mobileDraftScope='',banterComposerKey='';
-let roomReady=false,roomEntering=false,roomLoading=false,lastRoomId='',roomLobbyKey='',roomStatus='正在连接房间…',roomEntryError='',roomChatBusy=false,roomChatScope='';
+let roomReady=false,roomEntering=false,roomLoading=false,lastRoomId='',roomLobbyKey='',roomStatus='正在连接房间…',roomEntryError='',roomChatBusy=false,roomChatScope='',roomChatReply='',roomChatOptions='';
+let roomSelectionKey='',roomSelectionTimer;
 const roomClient=createRoomClient({request:api,onChange:receiveRoom,onError:toast,onConnection:(connected,text)=>{roomStatus=text;$('roomConnection').textContent=text;document.body.classList.toggle('room-disconnected',mode==='online'&&!!roomClient.room&&!connected);if(config&&mode==='online'){actionKey='';render();}}});
 const isRoom=()=>mode==='online';
 const isHost=()=>!isRoom()||roomClient.room?.hostId===config?.user?.id;
@@ -42,9 +44,19 @@ $('retryCharacterPreparation').onclick=()=>playerSeats.retryPrepared();
 const conversation=createConversation($('conversationPanel'));
 const banterComposer=document.createElement('div');banterComposer.className='banter-composer';banterComposer.hidden=true;$('conversationPanel').insertBefore(banterComposer,$('conversationPanel').querySelector('footer'));bindBanterControls(banterComposer,act);
 const roomChatComposer=document.createElement('form');roomChatComposer.className='room-chat-composer';roomChatComposer.hidden=true;
-roomChatComposer.innerHTML='<label for="roomChatInput">房间聊天</label><div><input id="roomChatInput" maxlength="200" required autocomplete="off" placeholder="和大家聊两句，请勿剧透答案"><button class="primary" type="submit">发送</button></div><small id="roomChatStatus" role="status">所有房间成员可见，观战也能聊天。</small>';
+roomChatComposer.innerHTML='<label class="sr-only" for="roomChatInput">聊天消息</label><div class="room-message-row"><select id="roomChatTarget" aria-label="发送对象"></select><input id="roomChatInput" maxlength="200" required autocomplete="off" placeholder="说点什么，也可以 @ 真人或 AI"><button class="primary" type="submit">发送</button></div><div class="room-message-meta"><small id="roomChatStatus" role="status"></small><button type="button" class="quiet" id="roomChatRetry" hidden>重试回应</button></div>';
 $('conversationPanel').insertBefore(roomChatComposer,banterComposer);
-roomChatComposer.onsubmit=async e=>{e.preventDefault();if(roomChatBusy||!roomClient.connected)return;const input=$('roomChatInput'),text=input.value.trim(),roomId=roomClient.room?.id;if(!text)return;roomChatBusy=true;renderRoomChat();try{await roomClient.chat(text);if(roomClient.room?.id===roomId&&input.value.trim()===text)input.value='';$('roomChatStatus').textContent='已发送 · 所有房间成员可见。';}catch(error){$('roomChatStatus').textContent=error.message;}finally{roomChatBusy=false;renderRoomChat();}};
+roomChatComposer.onsubmit=async e=>{
+  e.preventDefault();if(roomChatBusy||!roomClient.connected)return;
+  const input=$('roomChatInput'),text=input.value.trim(),room=roomClient.room;if(!text||!room)return;
+  let errorText='';roomChatBusy=true;
+  try{const message=roomMessageAction(room,myId(),$('roomChatTarget').value,text);renderRoomChat();
+    const sent=message.action==='chat'?(await roomClient.chat(text,message.extra.targetId),true):await act(message.action,message.extra);
+    if(sent&&roomClient.room?.id===room.id&&input.value.trim()===text)input.value='';
+  }catch(error){errorText=error.message;}finally{roomChatBusy=false;renderRoomChat();if(errorText)$('roomChatStatus').textContent=errorText;}
+};
+$('roomChatTarget').onchange=()=>renderRoomChat();
+$('roomChatRetry').onclick=()=>act('banter-retry',{banterId:roomClient.room?.game?.banter?.id});
 const mobileRoster=createMobileRoster({container:$('guessers'),section:$('mobileRoster'),home:document.querySelector('.play-sidebar')});
 bindBanterControls($('actionPanel'),act);bindBanterControls($('results'),act);
 document.querySelector('.final-setup').insertAdjacentHTML('beforebegin','<div class="setup-row banter-setting"><span class="row-label">赛后互动</span><div><label class="check"><input type="checkbox" id="banterEnabled" checked> 开启赛后互怼</label><p class="hint-mode-help">答案揭晓后，AI 可能根据真实作答点名；你也可以在聊天里 @ 选手发起互怼。自动最多两组，可随时跳过。</p></div></div>');
@@ -108,7 +120,9 @@ function renderLobby(){
   document.querySelector('.intro').hidden=roomMode&&(!room||!host);
   document.querySelector('.setup-panel').hidden=roomMode&&(!room||!host);
   $('roomCustomWords').hidden=!roomMode||!room||!host;$('roomTimeLimits').hidden=!roomMode||!room||!host;
-  $('selectedAiPreview').hidden=roomMode&&(!room||!host);
+  $('selectedAiPreview').hidden=roomMode&&!room;
+  $('selectedAiPreview').querySelector('p').textContent=roomMode&&!host?'房主当前选择的 AI，开局后会一起进入画桌。':'上方勾选的 AI 会在这里展示，开局后进入选手席。';
+  $('selectedAiEmpty').textContent=roomMode&&!host?'房主还没有选择 AI，也可以只玩真人对局。':'还没有选择 AI。勾选上方选手，即可预览对应角色。';
   $('customWordCount').textContent=`（${config.defaults?.customWordCount||0} 词）`;
   $('players').innerHTML=(roomMode?(room?.members||[]).map(p=>`<span class="chip human selected">${esc(p.name)}${p.id===config.user.id?'（你）':''}<small>真人</small></span>`).join(''):`<button class="chip human ${human?'selected':''}" data-human="1" aria-pressed="${human}">✦ 你 <small>人类</small></button>`)+config.players.map(p=>`<button class="chip ${selected.has(p.id)?'selected':''} ${(p.provider!=='codex'&&!p.hasKey&&p.provider!=='compatible')?'unavailable':''}" data-player="${esc(p.id)}" aria-pressed="${selected.has(p.id)}" title="${esc(playerLabel(p))}" style="--p-color:${esc(p.color)}"><span class="chip-dot"></span>${esc(p.name)}<small class="chip-model">${esc(playerModelLabel(p))}</small><small>${p.provider==='codex'?'命令行':p.hasKey?'API':'待配置'}</small></button>`).join('');
   const levels=config.categoryLevels?.[category]||(category==='成语'?config.idiomLevels:[]),level=levels.find(item=>item.id===idiomLevel)||levels[0];
@@ -132,11 +146,18 @@ function renderLobby(){
   $('connectionInfo').textContent=config.players.some(p=>p.hasKey)?'当前使用你自己的 AI 配置；修改后下一场比赛生效。':'在「AI 设置」配置自己的 Key，服务端加密保存，换设备登录后继续使用。';
   document.querySelectorAll('[data-mode]').forEach(e=>{e.classList.toggle('selected',e.dataset.mode===mode);e.setAttribute('aria-pressed',e.dataset.mode===mode);});
   document.querySelectorAll('[data-rounds]').forEach(e=>{e.classList.toggle('selected',+e.dataset.rounds===rounds);e.setAttribute('aria-pressed',+e.dataset.rounds===rounds);});
-  playerSeats.prepare(config.players.filter(p=>selected.has(p.id)));
+  playerSeats.prepare(roomMode&&room&&!host?room.lobby?.players||[]:config.players.filter(p=>selected.has(p.id)));
+  publishRoomSelection();
   for(const control of document.querySelectorAll('.setup-panel button,.setup-panel input'))control.disabled=roomMode&&(!host||roomLoading);
   for(const tab of document.querySelectorAll('[data-mode]'))tab.disabled=config.user?.role==='guest'&&tab.dataset.mode!=='online';
   if(roomMode){$('connectionInfo').textContent='房间使用房主的 AI 配置；每位真人独立作答，揭晓后公开。';$('startButton').textContent='开始联机比赛';}
   if(mode==='battle'&&config.randomTurnOrder)$('matchInfo').textContent+=' · 每局随机出场';
+}
+function publishRoomSelection(){
+  const room=roomClient.room;if(!isRoom()||!room||!isHost()||game&&game.phase!=='finished')return;
+  const playerIds=config.players.filter(p=>selected.has(p.id)).map(p=>p.id),key=JSON.stringify([room.id,playerIds,config.players]);
+  if(key===roomSelectionKey)return;roomSelectionKey=key;clearTimeout(roomSelectionTimer);
+  roomSelectionTimer=setTimeout(async()=>{if(!isRoom()||roomClient.room?.id!==room.id||!isHost()||game&&game.phase!=='finished')return;try{await roomClient.lobby({playerIds});}catch(error){roomSelectionKey='';toast(error.message);}},150);
 }
 $('players').onclick=e=>{const h=e.target.closest('[data-human]'),p=e.target.closest('[data-player]');if(h){if(mode==='duel')return toast('单人模式需要你参加。');human=!human;}if(p){const id=p.dataset.player;if(mode==='duel')selected=new Set([id]);else selected.has(id)?selected.delete(id):selected.add(id);}renderLobby();};
 $('categories').onclick=e=>{const b=e.target.closest('[data-category]');if(b){category=b.dataset.category;renderLobby();}};
@@ -158,11 +179,11 @@ function receiveRoom(next){
   if(!next&&$('roomDialog').open)$('roomDialog').close();
   const changed=game?.id!==next?.game?.id;
   game=next?.game||null;
-  if(next&&next.id!==lastRoomId){lastRoomId=next.id;$('useCustomWords').checked=!!config.defaults?.useCustomWords;}
+  if(next&&next.id!==lastRoomId){lastRoomId=next.id;$('useCustomWords').checked=!!config.defaults?.useCustomWords;if(next.hostId===config.user.id&&next.lobby)selected=new Set(next.lobby.playerIds);}
   if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();if(changed)selected=new Set(game.players.filter(p=>!p.human).map(p=>p.id));}
   if(changed)resetView();
   if(!roomEntering){const url=new URL('/',location.origin);url.searchParams.set('mode','online');const code=next?.id||new URL(location.href).searchParams.get('room');if(code)url.searchParams.set('room',code);history.replaceState(null,'',url);}
-  const lobbyKey=JSON.stringify([next?.id,next?.hostId,next?.members,game?.id,game?.phase==='finished',roomLoading,roomReady]);
+  const lobbyKey=JSON.stringify([next?.id,next?.hostId,next?.members,next?.lobby,game?.id,game?.phase==='finished',roomLoading,roomReady]);
   if(lobbyKey!==roomLobbyKey){roomLobbyKey=lobbyKey;renderLobby();}
   render();
 }
@@ -249,16 +270,26 @@ function render(){
   renderAction();renderGuessers();maybeAuto();
 }
 function renderBanterComposer(){
-  const markup=banterComposerMarkup(game,myId()),connected=!isRoom()||roomClient.connected,key=markup+'::'+connected;
+  const markup=isRoom()?'':banterComposerMarkup(game,myId()),connected=!isRoom()||roomClient.connected,key=markup+'::'+connected;
   if(key===banterComposerKey)return;banterComposerKey=key;
   const draft=captureBanterDraft(banterComposer);banterComposer.innerHTML=markup;banterComposer.hidden=!markup;restoreBanterDraft(banterComposer,draft);
   if(!connected)for(const button of banterComposer.querySelectorAll('button'))button.disabled=true;
 }
 function renderRoomChat(){
   const scope=isRoom()?roomClient.room?.id||'':'';
-  if(scope!==roomChatScope){roomChatScope=scope;$('roomChatInput').value='';$('roomChatStatus').textContent='所有房间成员可见，观战也能聊天。';}
+  if(scope!==roomChatScope){roomChatScope=scope;$('roomChatInput').value='';roomChatReply='';roomChatOptions='';}
   roomChatComposer.hidden=!isRoom()||!roomClient.room;
+  const state=roomComposerState(roomClient.room,myId()),select=$('roomChatTarget'),selected=select.value;
+  const options=state.targets.map(p=>`<option value="${esc(p.id)}"${p.disabled?' disabled':''}>${p.id?'@':''}${esc(p.name)}${p.kind==='ai'?' · AI':''}</option>`).join('');
+  if(options!==roomChatOptions){roomChatOptions=options;select.innerHTML=options;select.value=state.targets.some(p=>p.id===selected&&!p.disabled)?selected:'';}
+  const replyKey=state.reply?.id||'';if(replyKey!==roomChatReply){roomChatReply=replyKey;if(state.reply)select.value=state.reply.fromId;}
+  const target=state.targets.find(p=>p.id===select.value),reply=state.reply?.fromId===select.value;
+  $('roomChatInput').maxLength=target?.kind==='ai'||reply?120:200;
+  $('roomChatInput').placeholder=reply?`回复 @${state.reply.fromName}`:target?.id?`对 @${target.name} 说点什么…`:'说点什么，也可以 @ 真人或 AI';
+  $('roomChatStatus').textContent=state.hint;$('roomChatRetry').hidden=!state.retry;
   for(const control of roomChatComposer.elements)control.disabled=roomChatBusy||!roomClient.connected;
+  // Reapply unavailable AI options after the form's connection state changes.
+  for(const option of select.options)option.disabled=!!state.targets.find(p=>p.id===option.value)?.disabled;
 }
 function banterEntry(){return game?.banterEnabled&&game?.players.some(p=>p.id===myId()&&p.human)?'<button class="quiet" data-action="open-banter">@ 选手发起互怼</button>':'';}
 function updateCountdown(){
@@ -394,9 +425,10 @@ function roomBanterMarkup(b){
   if(!b)return '';
   const current=b.exchanges[b.index],canReply=b.status==='waiting-human'&&current?.toId===myId();
   const node=document.createElement('div');node.innerHTML=banterMarkup(b);
-  if(!canReply)node.querySelector('[data-banter-form]')?.remove();
+  node.querySelector('[data-banter-form]')?.remove();
   if(!isHost()&&!(current?.manual&&current.fromId===myId()))for(const button of node.querySelectorAll('[data-banter-action]'))button.remove();
   if(b.status==='waiting-human'&&!canReply)node.querySelector('.banter-status').textContent=`等待 ${current?.toName||'玩家'} 回应 ${current?.fromName||'对方'}。`;
+  if(canReply)node.querySelector('.banter-status').textContent=`${current.fromName} 点了你，在聊天输入框直接回应。`;
   return node.innerHTML+banterEntry();
 }
 $('actionPanel').onclick=async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
@@ -407,7 +439,7 @@ $('actionPanel').onclick=async e=>{const b=e.target.closest('[data-action]');if(
     else {b.disabled=true;await act(a,extra);}
     if(b.isConnected)b.disabled=false;return;
   }
-  if(a==='open-banter'){$('mobileChat').click();(isSpectator()?$('roomChatInput'):banterComposer.querySelector('[data-banter-input]'))?.focus({preventScroll:true});return;}
+  if(a==='open-banter'){$('mobileChat').click();(isRoom()?$('roomChatInput'):banterComposer.querySelector('[data-banter-input]'))?.focus({preventScroll:true});return;}
   if(a==='submit'){submitCanvas();return;}
   if(a==='settings'){openSettings();return;}
   if(a==='reveal-confirm'){if(await confirmAction('结束这一题？','会公布答案，未猜中的选手不再获得本题分数。','公布答案'))act('reveal');return;}

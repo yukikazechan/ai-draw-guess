@@ -3,7 +3,7 @@ export const escapeText=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 const esc=escapeText;
 export const matchNote=match=>({'idiom-order':'四个字齐全，顺序不同也算对','idiom-three':'三个字位置正确，也算对'})[match]||'';
 export function messageLabel(message){
-  if(message.kind==='chat')return message.spectator?'房间聊天 · 观战':'房间聊天';
+  if(message.kind==='chat')return `${message.spectator?'观战发言':'聊天'}${message.targetName?' → '+message.targetName:''}`;
   if(message.kind==='forfeit')return '超时判分';
   if(message.kind==='guess'&&message.timedOut)return '作答超时';
   if(message.kind==='banter')return `${message.reply?'回嘴':'互怼'} → ${message.targetName||'对方'}`;

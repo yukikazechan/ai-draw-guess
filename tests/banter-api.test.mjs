@@ -60,6 +60,14 @@ test('room @AI uses the host compatible API, records both sides, rejects imperso
     game=await until(async()=>{const s=await state(host);return s.banter.status==='complete'?s:null;});
     const continued=fixture.calls.filter(c=>c.purpose==='banter').at(-1).prompt;
     for(const text of [message,exchange.reply,'这次回应失败也别把消息吞掉。','我本人觉得这两颗果子挺明显的。','第三次，接着刚才的解释说。'])assert(continued.includes(text));
+    const observer=await request('/api/auth/guest',{code:room.id,name:'互怼观众'},'',201),originalSize=game.players.length;
+    assert.equal(observer.value.room.game.viewerRole,'spectator');
+    await request('/api/rooms/action',{...stamp,action:'banter-challenge',banterId,targetId:player.id,fromId:setup.value.user.id,text:'观众也来聊两句，接着刚才说。'},observer.cookie);
+    game=await until(async()=>{const s=await state(observer.cookie);return s.banter.status==='complete'?s:null;});
+    assert.equal(game.players.length,originalSize);assert(!game.players.some(p=>p.id===observer.value.user.id));
+    assert.equal(game.banter.exchanges.at(-1).fromId,observer.value.user.id);assert.equal(game.conversation.find(m=>m.playerId===observer.value.user.id).name,'互怼观众');
+    await request('/api/rooms/action',{...stamp,action:'finish'},observer.cookie,400);
+    await request('/api/rooms/leave',{},observer.cookie);assert.equal((await state(host)).phase,'reveal');
     await request('/api/rooms/action',{...stamp,action:'finish'},host);
     const third=await request('/api/auth/guest',{code:room.id,name:'另一玩家'},'',201);
     await request('/api/admin/defaults',{category:'动物',wordLevel:'easy',rounds:1,hintMode:'none',playerIds:[player.id],useCustomWords:true,customWords:['秘密甲','秘密乙','秘密丙','秘密丁']},host);

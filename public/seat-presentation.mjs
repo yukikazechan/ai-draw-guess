@@ -55,8 +55,8 @@ export function updateArenaLayout(game){
   const privacyHome=document.querySelector('.canvas-column');
   if(privacy.parentElement!==privacyHome)privacyHome.append(privacy);
   const panel=document.getElementById('conversationPanel');
-  const chatHome=game?.phase==='finished'?document.getElementById('results').parentElement:document.querySelector('.play-sidebar');
-  if(game&&!panel.dataset.panelExpanded&&panel.parentElement!==chatHome)chatHome.append(panel);
+  const chatHome=active?document.querySelector('.play-sidebar'):document.getElementById('results').parentElement;
+  if(!panel.dataset.panelExpanded&&panel.parentElement!==chatHome)chatHome.append(panel);
   const action=document.getElementById('actionPanel'),actionHome=document.querySelector('.canvas-column');
   if(action&&!action.dataset.panelExpanded&&action.parentElement!==actionHome)actionHome.append(action);
 }

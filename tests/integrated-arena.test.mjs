@@ -99,7 +99,7 @@ test('room adapter rejects older states and routes actions with the current roun
 test('only the named human can reply to room banter, and only the host can reset a finished game',async()=>{
   const rooms=new Rooms({accounts:{},recordings:{},makeOptions:()=>({})}),a={id:'a',name:'A'},b={id:'b',name:'B'};
   rooms.create(a);const room=rooms.require(a);rooms.join(b,room.id);
-  let replies=0;room.game={id:'g',index:0,turn:1,phase:'reveal',players:[{...a,human:true},{...b,human:true}],artist:{id:'a'},banter:{index:0,exchanges:[{toId:'b'}],check(){},reply(){replies++;}},snapshot(){return {};}};
+  let replies=0;room.game={id:'g',index:0,turn:1,phase:'reveal',players:[{...a,human:true},{...b,human:true}],artist:{id:'a'},banter:{players:[{...a,human:true},{...b,human:true}],index:0,exchanges:[{toId:'b'}],check(){},reply(){replies++;}},snapshot(){return {};}};
   const stamp={gameId:'g',index:0,turn:1};
   await assert.rejects(rooms.action(a,{...stamp,action:'banter-reply'}),/轮到自己/);
   await rooms.action(b,{...stamp,action:'banter-reply'});assert.equal(replies,1);

@@ -35,8 +35,15 @@ test('online accounts, admin controls, isolated rooms, WebSocket drawing, secret
     const created=(await request('/api/rooms/create',{},admin,201)).value.room;
     await request('/api/rooms/join',{code:created.id},alice.cookie);const other=(await request('/api/rooms/create',{},outsider.cookie,201)).value.room;assert.notEqual(created.id,other.id);
     const wa=await connect(admin),wb=await connect(alice.cookie);
+    const hostModel=(await request('/api/config',undefined,admin)).value.players.find(p=>p.enabled);
+    await request('/api/rooms/lobby',{playerIds:[hostModel.id]},alice.cookie,400);
+    await request('/api/rooms/lobby',{playerIds:[hostModel.id]},admin);
+    const preview=await until(()=>wb.states.at(-1)?.lobby?.players?.find(p=>p.id===hostModel.id));assert.equal(preview.model,hostModel.model);assert.equal(preview.characterId,hostModel.characterId);assert(!('apiKey' in preview));assert(!('baseUrl' in preview));
+    await request('/api/rooms/lobby',{playerIds:[]},admin);await until(()=>wb.states.at(-1)?.lobby?.players?.length===0);
+    const composerAsset=await fetch(base+'/room-composer.mjs');assert(composerAsset.ok);assert.match(composerAsset.headers.get('content-type'),/javascript/);
     await request('/api/rooms/start',{playerIds:[]},alice.cookie,400);
     await request('/api/rooms/start',{playerIds:[]},admin,202);
+    await request('/api/rooms/lobby',{playerIds:[]},admin,400);
     const getState=async cookie=>(await request('/api/rooms/state',undefined,cookie)).value.room;
     const sa=await until(async()=>{const r=await getState(admin);return r.game?.phase==='drawing'?r:null;}),sb=await getState(alice.cookie);
     assert.equal((await getState(outsider.cookie)).game,null);

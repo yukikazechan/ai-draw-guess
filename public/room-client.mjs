@@ -32,7 +32,8 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
   async function join(code){await mutate('/api/rooms/join',{code});connect();}
   async function leave(){await mutate('/api/rooms/leave',{});epoch++;closeSocket();adopt(null);}
   async function start(options){cancelDrawing();await mutate('/api/rooms/start',options);}
-  async function chat(text){await request('/api/rooms/chat',{text});await refresh();}
+  async function lobby(options){return mutate('/api/rooms/lobby',options);}
+  async function chat(text,targetId=''){await request('/api/rooms/chat',{text,targetId});await refresh();}
   async function action(action,extra={}){
     const g=room?.game;if(!g)return;
     cancelDrawing();await mutate('/api/rooms/action',{gameId:g.id,index:g.index,turn:g.turn,action,...extra});await refresh();
@@ -49,5 +50,5 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
     clearTimeout(drawTimer);drawTimer=setTimeout(flushDrawing,Math.max(0,90-(Date.now()-lastDraw)));
   }
   function suspend(){active=false;epoch++;closeSocket();}
-  return {get room(){return room;},get connected(){return connected;},enter,refresh,create,join,leave,start,chat,action,drawing,suspend};
+  return {get room(){return room;},get connected(){return connected;},enter,refresh,create,join,leave,start,lobby,chat,action,drawing,suspend};
 }

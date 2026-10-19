@@ -50,7 +50,7 @@ function session(req,res){
 async function body(req){let chunks=[],size=0;for await(const c of req){size+=c.length;if(size>4_000_000)throw new Error('请求太大。');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new Error('请求格式无效。');}}
 function launch(g,fn){Promise.resolve().then(fn).catch(e=>{if(!g.aborted){g.notice=e.message;g.touch();}});}
 const allowedFiles=new Map([['/','index.html'],...['index.html','app.mjs','relay-view.mjs','relay.css','model-picker.mjs','reasoning.mjs','guess-confidence.mjs','drawing.mjs','visual-hints.mjs','drawing-playback.mjs','characters.mjs','characters.html','characters-review.mjs','style.css','fonts.css','help.html','avatar.html','avatar.css','avatar-preview.mjs','avatar-game.mjs','player-seats.mjs','conversation.mjs','panel-drawer.mjs','seat-presentation.mjs','avatar-state.mjs','avatar-renderer.mjs'].map(f=>['/'+f,f])]);
-for(const file of ['production.html','production.css','production.mjs','production-player.mjs','recording-client.mjs','banter-view.mjs','room-client.mjs','round-results.mjs','mobile-roster.mjs','room.css'])allowedFiles.set('/'+file,file);
+for(const file of ['production.html','production.css','production.mjs','production-player.mjs','recording-client.mjs','banter-view.mjs','room-client.mjs','room-composer.mjs','round-results.mjs','mobile-roster.mjs','room.css'])allowedFiles.set('/'+file,file);
 for(const file of ['online.html','online.css','online.mjs'])allowedFiles.set('/'+file,file);
 allowedFiles.set('/avatar-loader.mjs','avatar-loader.mjs');
 allowedFiles.set('/online','online.html');

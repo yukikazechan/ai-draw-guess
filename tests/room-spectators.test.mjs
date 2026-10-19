@@ -21,7 +21,8 @@ test('中途加入只观战，不能提交或控制比赛，离开不会结束�
     assert.equal(watched.game.answer,null);assert(!watched.game.recordingEnabled);assert.deepEqual(game.players.map(p=>p.id),roster);assert.equal(game.clock.deadline,deadline);
     assert(!ownership.some(([id,user])=>id===game.id&&user===viewer.id));
     const stamp={gameId:game.id,index:game.index,turn:game.turn};
-    for(const action of ['guess','pass','draw-done','revise','next','finish','reveal','banter-challenge','banter-reply','banter-retry'])await assert.rejects(rooms.action(viewer,{...stamp,action,guess:'答案'}),/观战/);
+    for(const action of ['guess','pass','draw-done','revise','next','finish','reveal'])await assert.rejects(rooms.action(viewer,{...stamp,action,guess:'答案'}),/观战/);
+    for(const action of ['banter-challenge','banter-reply','banter-retry'])await assert.rejects(rooms.action(viewer,{...stamp,action}),/互怼环节/);
     assert.throws(()=>rooms.drawing(viewer,{...stamp,shapes:[]}),/画手/);
     rooms.leave(viewer);assert.equal(game.phase,'drawing');rooms.join(viewer,room.id);
     rooms.chat(viewer,{text:'下局一起玩！',name:'伪造房主',playerId:host.id});
@@ -52,7 +53,7 @@ test('房间聊天校验内容、限速、保留最近 200 条，并转义 HTML�
     rooms.join(viewer,room.id);
     for(const text of ['', ' ', 'x'.repeat(201),null,{}])assert.throws(()=>rooms.chat(viewer,{text}),/1–200/);
     rooms.chat(viewer,{text:'<img src=x onerror=alert(1)>'});const message=room.messages[0];
-    assert(messageBody(message).includes('&lt;img'));assert.equal(messageLabel(message),'房间聊天');
+    assert(messageBody(message).includes('&lt;img'));assert.equal(messageLabel(message),'聊天');
     assert.throws(()=>rooms.chat(viewer,{text:'刷屏'}),/太快/);
     assert.throws(()=>rooms.chat({id:'outsider'},{text:'不在房间'}),/加入房间/);
     for(let i=0;i<205;i++){room.members.get(viewer.id).chatAt=0;rooms.chat(viewer,{text:String(i)});}
