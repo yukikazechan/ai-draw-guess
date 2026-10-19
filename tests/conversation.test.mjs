@@ -28,7 +28,7 @@ test('放宽判定仍统一揭晓：AI 与人类同等计分，聊天说明判�
 });
 test('聊天按收件人和盲猜阶段过滤：不能用气泡或聊天偷看；观战可看已判分猜词',async()=>{
  const g=create();await g.next();g.reveal();await g.next();await g.beginGuess({image});g.humanGuess('东张西望');
- assert(!g.snapshot().conversation.some(m=>m.kind==='guess'&&m.playerId==='b'));assert(g.snapshot().conversation.some(m=>m.kind==='guess'&&m.playerId==='human'));
+ assert.equal(g.phase,'review');assert(g.snapshot().conversation.some(m=>m.kind==='guess'&&m.playerId==='b'));assert(g.snapshot().conversation.some(m=>m.kind==='guess'&&m.playerId==='human'));
  const mine={region:'top-left',focus:'outline'},other={region:'top-left',focus:'direction'};
  await g.revise();g.hint=visualHint({region:'all',focus:'whole'},shapes).text;g.setPrivateHints({human:mine,b:other});g.logHints();
  const before=g.snapshot();assert(!JSON.stringify(before).includes(visualHint(other,shapes).text));assert(latestSpeech(before,'a').text.includes(visualHint(mine,shapes).text));

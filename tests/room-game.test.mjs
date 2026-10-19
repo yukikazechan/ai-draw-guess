@@ -12,7 +12,8 @@ test('multiple humans and AI take turns, score independently, and receive only t
     g.humanGuess('bob-secret-guess',false,'bob');
     assert.equal(g.snapshot('carol').results.bob.history.length,0);assert(!JSON.stringify(g.snapshot('carol')).includes('bob-secret-guess'));
     g.humanGuess(g.word.answer,false,'carol');assert.equal(g.phase,'review');assert.equal(g.players.find(p=>p.id==='carol').guessScore,3);assert.equal(g.artist.drawScore,3);
-    assert(!JSON.stringify(g.snapshot('bob')).includes(g.word.answer));
+    assert.equal(g.snapshot('bob').answer,null);
+    assert.equal(g.snapshot('bob').results.carol.history[0].guess,g.word.answer); // All submissions are public after collective scoring.
     await g.revise();g.privateHints={bob:'only-bob',ai:'only-ai'};
     assert.equal(g.snapshot('bob').myHint,'only-bob');assert.deepEqual(g.snapshot('bob').privateHints,{});assert(!JSON.stringify(g.snapshot('bob')).includes('only-ai'));
     g.reveal();assert.equal(g.snapshot('bob').answer,g.word.answer);await g.next();assert.equal(g.artist.id,'bob');assert.equal(g.snapshot('alice').answer,null);assert.equal(g.snapshot('bob').answer,g.word.answer);

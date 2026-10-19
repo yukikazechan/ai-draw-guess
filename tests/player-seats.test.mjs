@@ -59,9 +59,9 @@ test('11–13 player battle and relay games keep the roundtable without remounti
     assert.ok(classes.has('roundtable'),`${mode}, ${count} players`);
     assert.equal(elements['.arena'].dataset.tableSize,count>10?'large':'standard');
     assert.equal(elements['.arena'].dataset.sideRows,count>11?'4':'3');
-    assert.equal(elements['.guess-heading'].parentElement,elements['.game-controls']);
+    assert.equal(elements['.guess-heading'].parentElement,elements['.play-sidebar']);
     assert.equal(elements.privacyNote.parentElement,elements['.canvas-column']);
-    assert.equal(elements.conversationPanel.parentElement,elements['.arena']);
+    assert.equal(elements.conversationPanel.parentElement,elements['.play-sidebar']);
     const previousMoves=moves;updateArenaLayout(game);assert.equal(moves,previousMoves);
   }
   const modal=node();elements.conversationPanel.dataset.panelExpanded='true';elements.conversationPanel.parentElement=modal;

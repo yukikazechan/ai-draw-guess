@@ -2,32 +2,35 @@ import {CharacterView} from './avatar-loader.mjs';
 import {seatCharacter,seatPresentation,tablePlaces} from './seat-presentation.mjs';
 import {latestSpeech,messageBody,messageLabel} from './conversation.mjs';
 import {playerModelLabel,playerLabel} from './characters.mjs';
+import {normalizeConfidence} from './guess-confidence.mjs';
+import {roundAnswerMarkup} from './round-results.mjs';
 
 
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 export function createPlayerSeats(container,{View=CharacterView,onPreparation=()=>{}}={}){
   const seats=new Map();let gameId=null,paused=false,prepared=[],active=false;
+  const visibility=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{for(const entry of entries){const seat=seats.get(entry.target.dataset.playerId);if(seat){seat.visible=entry.isIntersecting;seat.view?.setSuspended?.(!active||!seat.visible);}}},{threshold:0.01});
   // Keep initialized canvases connected and sized while the lobby is visible.
   const parking=document.createElement('div');parking.className='seat-preload-parking';parking.setAttribute('aria-hidden','true');parking.inert=true;document.body.append(parking);
   function report(){const chosen=prepared.map(p=>seats.get(p.id)).filter(Boolean);onPreparation({total:prepared.length,ready:chosen.filter(s=>s.status==='ready').length,failed:chosen.filter(s=>s.status==='error').length});}
-  function remove(id){const seat=seats.get(id);seat.view?.destroy();seat.card.remove();seats.delete(id);}
-  function clear(){for(const id of seats.keys())remove(id);gameId=null;parking.remove();}
+  function remove(id){const seat=seats.get(id);visibility?.unobserve(seat.card);seat.view?.destroy();seat.card.remove();seats.delete(id);}
+  function clear(){for(const id of seats.keys())remove(id);visibility?.disconnect();gameId=null;parking.remove();}
   function mount(player,character,home){
     const card=document.createElement('article');
     card.className=player.human?'player-seat human-seat':'player-seat ai-seat';card.dataset.playerId=player.id;
-    card.innerHTML='<header><div class="seat-identity"><strong class="seat-name"></strong><small class="seat-model"></small></div><span class="seat-score"></span></header><div class="seat-stage"></div><div class="seat-dialogue" hidden></div><div class="seat-caption"><span class="seat-role"></span><span class="seat-status"></span></div><div class="seat-feedback"></div>';
-    const seat={card,characterId:character?.id,modelUrl:character?.modelUrl,view:null,feedbackKey:'',status:'loading'};seats.set(player.id,seat);home.append(card);
+    card.innerHTML='<header><div class="seat-identity"><strong class="seat-name"></strong><small class="seat-model"></small></div><span class="seat-score"></span></header><div class="seat-stage"></div><div class="seat-dialogue" hidden></div><div class="seat-caption"><span class="seat-role"></span><span class="seat-status"></span><span class="seat-confidence" hidden></span></div><div class="seat-answers" aria-label="本题各轮答案"></div><div class="seat-feedback"></div>';
+    const seat={card,characterId:character?.id,modelUrl:character?.modelUrl,view:null,feedbackKey:'',status:'loading',visible:true};seats.set(player.id,seat);home.append(card);visibility?.observe(card);
     if(character){
       const stage=card.querySelector('.seat-stage');
-      stage.innerHTML='<canvas></canvas><span class="seat-loading" role="status">角色加载中…</span><button class="seat-retry" hidden>重新加载角色</button>';
+      stage.innerHTML='<canvas></canvas><span class="seat-loading" role="status">角色加载中…</span><button class="seat-retry" aria-label="重新加载角色" hidden>重试</button>';
       const canvas=stage.querySelector('canvas'),loading=stage.querySelector('.seat-loading'),retry=stage.querySelector('button');
       canvas.setAttribute('aria-label',`${player.name} 的 Live2D 角色`);card.dataset.character=character.id;
       seat.load=()=>{
         seat.view?.destroy();const next=canvas.cloneNode();stage.querySelector('canvas').replaceWith(next);loading.hidden=false;loading.textContent='角色加载中…';retry.hidden=true;
         seat.status='loading';report();
         const view=new View(next,{modelUrl:character.modelUrl,motion:character.motion,framing:'portrait',onReady:()=>{if(seat.view!==view||seats.get(player.id)!==seat)return;loading.hidden=true;seat.status='ready';report();},onError:()=>{if(seat.view!==view||seats.get(player.id)!==seat)return;loading.textContent='角色加载失败';retry.hidden=false;seat.status='error';report();}});
-        seat.view=view;view.setState(card.dataset.state||'idle');view.setPaused(paused);view.setSuspended?.(!active);view.load();
+        seat.view=view;view.setState(card.dataset.state||'idle');view.setPaused(paused);view.setSuspended?.(!active||!seat.visible);view.load();
       };
       retry.onclick=seat.load;seat.load();
     }else{card.querySelector('.seat-stage').remove();const mark=document.createElement('span');mark.className='human-mark';mark.setAttribute('aria-hidden','true');mark.textContent='✎';card.append(mark);}
@@ -40,7 +43,7 @@ export function createPlayerSeats(container,{View=CharacterView,onPreparation=()
       if(seat&&(seat.characterId!==character?.id||seat.modelUrl!==character?.modelUrl)){remove(player.id);seat=null;}
       seat||=mount(player,character,home);
       if(home.children[i]!==seat.card)home.insertBefore(seat.card,home.children[i]||null);
-      seat.view?.setSuspended?.(!active);
+      seat.view?.setSuspended?.(!active||!seat.visible);
     }
   }
   function prepare(players){prepared=players.filter(p=>!p.human);if(!active)reconcile(prepared,parking);report();}
@@ -51,7 +54,7 @@ export function createPlayerSeats(container,{View=CharacterView,onPreparation=()
       return;
     }
     active=true;const changed=gameId!==game.id;gameId=game.id;reconcile(game.players,container);
-    const places=tablePlaces(game.players);
+    const places=tablePlaces(game.players,game.viewerId);
     // Stable seats and canvases survive polling, scoring and artist changes.
     for(const player of game.players){
       const character=seatCharacter(player),seat=seats.get(player.id);
@@ -63,10 +66,17 @@ export function createPlayerSeats(container,{View=CharacterView,onPreparation=()
       card.dataset.state=presentation.state;card.classList.toggle('is-artist',presentation.artist);card.classList.toggle('solved',!!r?.solved);
       card.querySelector('.seat-name').textContent=player.name;
       card.querySelector('.seat-model').textContent=playerModelLabel(player);
+      card.querySelector('.seat-model').title=playerModelLabel(player);
       card.querySelector('.seat-model').hidden=!!player.human;
       card.querySelector('.seat-score').textContent=game.mode==='relay'?`第 ${game.index+1} 棒`:`${presentation.total} 分`;
-      card.querySelector('.seat-role').textContent=(player.human?'你 · ':'')+presentation.role;
+      card.querySelector('.seat-role').textContent=(player.id===(game.viewerId||'human')?'你 · ':player.human?'真人 · ':'')+presentation.role;
       card.querySelector('.seat-status').textContent=presentation.status;
+      const confidence=normalizeConfidence(r?.confidence),label=card.querySelector('.seat-confidence');
+      label.hidden=player.human||confidence===null||['waiting','thinking','queued'].includes(r?.status);
+      label.textContent=confidence===null?'':`把握 ${confidence}%`;
+      label.title='AI 根据画面自报的主观把握';
+      const answers=card.querySelector('.seat-answers'),markup=roundAnswerMarkup((r?.history||[]).filter(h=>!player.human||h.turn<game.turn||['review','reveal'].includes(game.phase)),escape);
+      if(answers.innerHTML!==markup)answers.innerHTML=markup;
       seat.view?.setState(presentation.state);
       const speech=latestSpeech(game,player.id),key=JSON.stringify([speech,r?.error]);
       if(key!==seat.feedbackKey){

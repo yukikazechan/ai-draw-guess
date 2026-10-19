@@ -4,6 +4,7 @@ export function drawingTransition(previous,next){
   return {keep,remove:previous.length-keep,append:next.slice(keep)};
 }
 export function shapePath(s){
+  if(s.type==='bucket')return [[s.x,s.y],[s.x,s.y]];
   if(s.type==='ellipse')return Array.from({length:65},(_,i)=>[s.x+Math.cos(i*Math.PI/32)*s.rx,s.y+Math.sin(i*Math.PI/32)*s.ry]);
   if(s.type==='rect')return [[s.x,s.y],[s.x+s.w,s.y],[s.x+s.w,s.y+s.h],[s.x,s.y+s.h],[s.x,s.y]];
   return s.type==='polygon'?[...s.points,s.points[0]]:s.points;
@@ -29,6 +30,7 @@ export async function animateProgress(duration,{draw,isActive=()=>true,frame=()=
   return true;
 }
 export function partialStroke(shape,progress){
+  if(shape.type==='bucket')return progress>=1?shape:{type:'line',points:[],color:'none',width:1};
   if(progress>=1)return shape;
   const path=shapePath(shape),points=[path[0]];let remaining=pathLength(path)*Math.max(0,progress);
   for(let i=1;i<path.length;i++){

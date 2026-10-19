@@ -50,7 +50,7 @@ function session(req,res){
 async function body(req){let chunks=[],size=0;for await(const c of req){size+=c.length;if(size>4_000_000)throw new Error('请求太大。');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new Error('请求格式无效。');}}
 function launch(g,fn){Promise.resolve().then(fn).catch(e=>{if(!g.aborted){g.notice=e.message;g.touch();}});}
 const allowedFiles=new Map([['/','index.html'],...['index.html','app.mjs','relay-view.mjs','relay.css','model-picker.mjs','reasoning.mjs','guess-confidence.mjs','drawing.mjs','visual-hints.mjs','drawing-playback.mjs','characters.mjs','characters.html','characters-review.mjs','style.css','fonts.css','help.html','avatar.html','avatar.css','avatar-preview.mjs','avatar-game.mjs','player-seats.mjs','conversation.mjs','panel-drawer.mjs','seat-presentation.mjs','avatar-state.mjs','avatar-renderer.mjs'].map(f=>['/'+f,f])]);
-for(const file of ['production.html','production.css','production.mjs','production-player.mjs','recording-client.mjs','banter-view.mjs'])allowedFiles.set('/'+file,file);
+for(const file of ['production.html','production.css','production.mjs','production-player.mjs','recording-client.mjs','banter-view.mjs','room-client.mjs','round-results.mjs','mobile-roster.mjs','room.css'])allowedFiles.set('/'+file,file);
 for(const file of ['online.html','online.css','online.mjs'])allowedFiles.set('/'+file,file);
 allowedFiles.set('/avatar-loader.mjs','avatar-loader.mjs');
 allowedFiles.set('/online','online.html');
@@ -66,7 +66,7 @@ const server=http.createServer(async(req,res)=>{
     res.setHeader('Content-Security-Policy',`default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${socketOrigins}; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     const url=new URL(req.url,'http://'+host),path=url.pathname;
     req.user=online.accounts.authenticate(req);
-    if(req.method==='GET'&&['/','/index.html'].includes(path)&&(!req.user||req.user.role==='guest')){res.writeHead(302,{Location:'/online'});return res.end();}
+    if(req.method==='GET'&&['/','/index.html'].includes(path)&&!req.user){const invite=url.searchParams.get('room');res.writeHead(302,{Location:invite?'/online?room='+encodeURIComponent(invite):'/online'});return res.end();}
     if(req.method==='GET'&&allowedFiles.has(path)){const file=allowedFiles.get(path);res.writeHead(200,{'Content-Type':types[file.split('.').pop()],'Cache-Control':'no-cache'});return res.end(await readFile(join(ROOT,'public',file)));}
     if(!path.startsWith('/api/'))return json(res,{error:'未找到。'},404);
     if(req.method==='POST') {
@@ -92,15 +92,21 @@ const server=http.createServer(async(req,res)=>{
       const zip=zipFiles(files);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':zip.length,'Cache-Control':'no-store','Content-Disposition':`attachment; filename="draw-guess-${path==='/api/production'?'production':'characters'}-${id}.zip"`});return res.end(zip);
     }
     if(req.method==='GET'&&path==='/api/export') {
-      if(!s.game||s.game.phase!=='finished')throw new Error('先结束比赛，再导出复盘。');
+      const requested=url.searchParams.get('id'),roomGame=online.rooms.byUser.has(req.user.id)?online.rooms.require(req.user).game:null;
+      const exported=requested?(roomGame?.id===requested?roomGame:s.game?.id===requested?s.game:null):s.game;
+      if(!exported||exported.phase!=='finished')throw new Error('先结束比赛，再导出复盘。');
       res.setHeader('Content-Disposition','attachment; filename="draw-guess-replay.json"');
-      return json(res,s.game.recording?.export()||{version:1,exportedAt:new Date().toISOString(),...s.game.snapshot()});
+      return json(res,exported.recording?.export()||{version:1,exportedAt:new Date().toISOString(),...exported.snapshot(req.user.id)});
     }
     if(req.method!=='POST')return json(res,{error:'未找到。'},404);
     const data=await body(req);
     if(path==='/api/recording-events'){
-      if(!s.game?.recording||s.game.id!==data.gameId)throw new Error('素材记录对应的比赛已变更。');
-      s.game.recording.client(data.events);return json(res,{ok:true});
+      const roomGame=online.rooms.byUser.has(req.user.id)?online.rooms.require(req.user).game:null;
+      const recorded=roomGame?.id===data.gameId?roomGame:s.game;
+      if(!recorded?.recording||recorded.id!==data.gameId)throw new Error('素材记录对应的比赛已变更。');
+      // One browser records AI playback; each artist records only their own strokes.
+      if(recorded===roomGame&&req.user.id!==online.rooms.require(req.user).hostId&&req.user.id!==recorded.artist?.id)return json(res,{ok:true});
+      recorded.recording.client(data.events);return json(res,{ok:true});
     }
     if(path==='/api/shutdown'){json(res,{ok:true});setTimeout(shutdown,100);return;}
     if(path==='/api/openrouter-key'){

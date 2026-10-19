@@ -17,7 +17,7 @@ const basic=opts=>new Game({players,human:false,words,category:'食物',orderRan
 test('记录所有改画、提示、提交和揭晓，保持对战公开状态原有保密边界',async()=>{
   let draw=0,guess=0;const g=basic({run:async(_p,_prompt,img)=>img?{guess:++guess<3?'苹果':'西瓜',reason:'右边的果皮',confidence:81,receipt:{requestedModel:'test/qwen',responseModel:'actual/qwen',apiKey:'DO-NOT-EXPORT-THIS-KEY'}}:{shapes:[shape(200+ ++draw*100)],hint:draw>1?'注意右边的外轮廓':'',hints:draw>1?{b:'那不是苹果蒂，看长条纹'}:{}}});
   const journal=[],r=new MatchRecording(g,{write:e=>journal.push(e)});await g.next();
-  await g.beginGuess({image});assert.equal(g.phase,'review');assert.deepEqual(g.snapshot().results.b.history,[]);assert(!JSON.stringify(g.snapshot()).includes('recording'));
+  await g.beginGuess({image});assert.equal(g.phase,'review');assert.equal(g.snapshot().results.b.history[0].guess,'苹果');assert(!JSON.stringify(g.snapshot()).includes('recording'));
   await g.revise();await g.beginGuess({image});await g.revise();await g.beginGuess({image});g.finish();
   const out=r.export(),changes=out.recording.events.filter(e=>e.type==='state'&&e.data.drawingId).map(e=>out.recording.assets[e.data.drawingId].shapes[0]?.x).filter(Boolean);
   assert.deepEqual(changes,[300,400,500]);assert.equal(out.history[0].shapes[0].x,500);

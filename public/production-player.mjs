@@ -31,7 +31,14 @@ export function mountProduction(root,input,options={}){
   const person=id=>players.find(p=>p.id===id);
   function paint(target,shapes){
     const c=target.getContext('2d');c.fillStyle='#ffffff';c.fillRect(0,0,target.width,target.height);c.save();c.scale(target.width/1000,target.height/650);
-    for(const s of shapes){c.save();c.strokeStyle=s.color||'#202633';c.fillStyle=s.fill||'transparent';c.lineWidth=s.width||5;c.lineCap='round';c.lineJoin='round';c.beginPath();
+    for(const s of shapes){
+      if(s.type==='bucket'){
+        const image=c.getImageData(0,0,target.width,target.height),data=image.data,w=image.width,h=image.height,x=Math.min(w-1,Math.round(s.x*w/1000)),y=Math.min(h-1,Math.round(s.y*h/650)),start=(y*w+x)*4,old=[...data.slice(start,start+4)],rgb=[1,3,5].map(i=>parseInt(s.color.slice(i,i+2),16));
+        const queue=new Uint32Array(w*h),seen=new Uint8Array(w*h);let head=0,tail=1;queue[0]=y*w+x;seen[queue[0]]=1;
+        while(head<tail){const p=queue[head++],i=p*4;if(Math.max(...old.map((v,k)=>Math.abs(data[i+k]-v)))>24)continue;data[i]=rgb[0];data[i+1]=rgb[1];data[i+2]=rgb[2];data[i+3]=255;const col=p%w;for(const n of [col>0?p-1:-1,col+1<w?p+1:-1,p>=w?p-w:-1,p+w<w*h?p+w:-1])if(n>=0&&!seen[n]){seen[n]=1;queue[tail++]=n;}}
+        c.putImageData(image,0,0);continue;
+      }
+      c.save();c.strokeStyle=s.color||'#202633';c.fillStyle=s.fill||'transparent';c.lineWidth=s.width||5;c.lineCap='round';c.lineJoin='round';c.beginPath();
       if(s.type==='ellipse')c.ellipse(s.x,s.y,s.rx,s.ry,0,0,Math.PI*2);else if(s.type==='rect')c.rect(s.x,s.y,s.w,s.h);else{(s.points||[]).forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));if(s.type==='polygon')c.closePath();}
       if(s.fill&&s.fill!=='none')c.fill();if(s.color!=='none')c.stroke();c.restore();
     }c.restore();

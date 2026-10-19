@@ -29,6 +29,7 @@ export const HINT_FOCUSES=[
 ];
 
 function bounds(s){
+  if(s.type==='bucket')return [s.x,s.y,s.x,s.y];
   if(s.type==='ellipse')return [s.x-s.rx,s.y-s.ry,s.x+s.rx,s.y+s.ry];
   if(s.type==='rect')return [s.x,s.y,s.x+s.w,s.y+s.h];
   return [Math.min(...s.points.map(p=>p[0])),Math.min(...s.points.map(p=>p[1])),Math.max(...s.points.map(p=>p[0])),Math.max(...s.points.map(p=>p[1]))];
