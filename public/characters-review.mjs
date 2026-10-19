@@ -8,7 +8,7 @@ for(const c of CHARACTERS){
  document.getElementById('cards').append(card);
  const status=card.querySelector('.status');
  const view=new CharacterView(card.querySelector('canvas'),{modelUrl:c.modelUrl,motion:c.motion,framing:'full',onReady:()=>{status.textContent=labels[state];view.setState(state);view.setPaused(paused)},onError:e=>{status.textContent=e.message;status.classList.add('error')}});
- views.push({view,status});view.setState(state);await view.load();
+ views.push({view,status});view.setState(state);view.load();
 }
 document.querySelector('nav').onclick=e=>{
  const button=e.target.closest('[data-state]');if(!button)return;

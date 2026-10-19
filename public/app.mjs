@@ -20,7 +20,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 let config=null,game=null,mode='battle',human=true,category='成语',idiomLevel='easy',rounds=1,selected=new Set(),localShapes=[],color='#202633',erasing=false,currentStroke=null;
 let canvasKey='',actionKey='',resultKey='',animation=0,animating=false,inFlight=0,autoSent='',toastTimer,polling=false,online=true;
 let modelCatalog=null,actionDraftScope='',hintMode='visual';
-let productionTrace=null,bucket=false;
+let productionTrace=null,bucket=false,mobileDraftScope='';
 let roomReady=false,roomEntering=false,roomLoading=false,lastRoomId='',roomLobbyKey='',roomStatus='正在连接房间…';
 const roomClient=createRoomClient({request:api,onChange:receiveRoom,onError:toast,onConnection:(connected,text)=>{roomStatus=text;$('roomConnection').textContent=text;document.body.classList.toggle('room-disconnected',mode==='online'&&!!roomClient.room&&!connected);if(config&&mode==='online'){actionKey='';render();}}});
 const isRoom=()=>mode==='online';
@@ -57,6 +57,12 @@ $('pauseSeats').onclick=()=>{const button=$('pauseSeats'),paused=button.getAttri
 $('mobilePauseSeats').onclick=()=>$('pauseSeats').click();
 $('mobileInvite').onclick=()=>$('copyRoom').click();
 $('mobileLeave').onclick=()=>$('leaveRoom').click();
+$('mobileChat').onclick=()=>$('conversationPanel').querySelector('.panel-expand')?.click();
+$('mobileAction').onclick=()=>$('actionPanel').querySelector('.panel-expand')?.click();
+$('mobileGuessForm').onsubmit=e=>{e.preventDefault();const guess=$('mobileGuessInput').value.trim();if(guess)act('guess',{guess});};
+$('mobilePrimary').onclick=()=>{const action=$('mobilePrimary').dataset.action;if(action==='submit')submitCanvas();else if(action==='open-action')$('mobileAction').click();else if(action==='relay-draw-submit'){if(!localShapes.length)return toast('先在画布上画几笔。');act('relay-submit',{stage:game.index,chainId:game.relay.myTask.chainId,shapes:localShapes});}else if(action)act(action);};
+const mobileDockSize=new ResizeObserver(entries=>{const height=entries[0]?.contentRect.height;if(height)document.documentElement.style.setProperty('--mobile-dock-height',Math.ceil($('mobileMatchDock').getBoundingClientRect().height)+'px');});mobileDockSize.observe($('mobileMatchDock'));
+addEventListener('pagehide',()=>mobileDockSize.disconnect(),{once:true});
 async function api(path,data) {
   let r;try{r=await fetch(path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json','X-Game-Request':'1'},body:JSON.stringify(data)});}catch{throw new Error('连接不到游戏服务，请检查网络后刷新重试。');}
   const j=await r.json();if(r.status===401){const invite=new URL(location.href).searchParams.get('room');location.assign(invite?'/online?room='+encodeURIComponent(invite):'/online');throw new Error('登录已过期，请重新登录。');}if(!r.ok)throw new Error(j.error||'操作失败。');return j;
@@ -90,7 +96,7 @@ function renderLobby(){
   }
   document.querySelector('.intro').hidden=roomMode&&(!room||!host);
   document.querySelector('.setup-panel').hidden=roomMode&&(!room||!host);
-  $('roomCustomWords').hidden=!roomMode||!room||!host;
+  $('roomCustomWords').hidden=!roomMode||!room||!host;$('roomTimeLimits').hidden=!roomMode||!room||!host;
   $('customWordCount').textContent=`（${config.defaults?.customWordCount||0} 词）`;
   $('players').innerHTML=(roomMode?(room?.members||[]).map(p=>`<span class="chip human selected">${esc(p.name)}${p.id===config.user.id?'（你）':''}<small>真人</small></span>`).join(''):`<button class="chip human ${human?'selected':''}" data-human="1" aria-pressed="${human}">✦ 你 <small>人类</small></button>`)+config.players.map(p=>`<button class="chip ${selected.has(p.id)?'selected':''} ${(p.provider!=='codex'&&!p.hasKey&&p.provider!=='compatible')?'unavailable':''}" data-player="${esc(p.id)}" aria-pressed="${selected.has(p.id)}" title="${esc(playerLabel(p))}" style="--p-color:${esc(p.color)}"><span class="chip-dot"></span>${esc(p.name)}<small class="chip-model">${esc(playerModelLabel(p))}</small><small>${p.provider==='codex'?'命令行':p.hasKey?'API':'待配置'}</small></button>`).join('');
   const levels=config.categoryLevels?.[category]||(category==='成语'?config.idiomLevels:[]),level=levels.find(item=>item.id===idiomLevel)||levels[0];
@@ -140,7 +146,7 @@ function receiveRoom(next){
   const changed=game?.id!==next?.game?.id;
   game=next?.game||null;
   if(next&&next.id!==lastRoomId){lastRoomId=next.id;$('useCustomWords').checked=!!config.defaults?.useCustomWords;}
-  if(game)game.viewerId=config.user.id;
+  if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();}
   if(changed)resetView();
   if(!roomEntering){const url=new URL('/',location.origin);url.searchParams.set('mode','online');if(next)url.searchParams.set('room',next.id);history.replaceState(null,'',url);}
   const lobbyKey=JSON.stringify([next?.id,next?.hostId,next?.members,game?.id,game?.phase==='finished',roomLoading,roomReady]);
@@ -168,7 +174,7 @@ $('startButton').onclick=async()=>{
   const missing=config.players.filter(p=>selected.has(p.id)&&p.provider!=='codex'&&p.provider!=='compatible'&&!p.hasKey);
   if(missing.length){toast(`${missing.map(p=>p.name).join('、')} 尚未填写 API Key。`);openSettings();return;}
   $('startButton').disabled=true;
-  try{const options={playerIds:[...selected],human,mode,category,idiomLevel,wordLevel:idiomLevel,hintMode,banter:$('banterEnabled').checked,rounds:mode==='relay'?1:rounds};if(isRoom())await roomClient.start({...options,useCustomWords:$('useCustomWords').checked});else await api('/api/start',options);resetView();await poll();}catch(e){toast(e.message);}finally{$('startButton').disabled=false;}
+  try{const options={playerIds:[...selected],human,mode,category,idiomLevel,wordLevel:idiomLevel,hintMode,banter:$('banterEnabled').checked,rounds:mode==='relay'?1:rounds};if(isRoom())await roomClient.start({...options,useCustomWords:$('useCustomWords').checked,drawSeconds:Number($('drawSeconds').value),guessSeconds:Number($('guessSeconds').value)});else await api('/api/start',options);resetView();await poll();}catch(e){toast(e.message);}finally{$('startButton').disabled=false;}
 };
 function resetView(){canvasKey='';actionKey='';resultKey='';autoSent='';localShapes=[];drawingHistory.reset();currentStroke=null;animation++;animating=false;window.scrollTo({top:0,behavior:'instant'});}
 async function act(action,extra={}){
@@ -178,7 +184,7 @@ async function act(action,extra={}){
   inFlight++;
   try{await productionTrace?.flush();if(isRoom())await roomClient.action(action,{...stamp,...extra});else await api('/api/action',{gameId:id,action,...extra});await poll();}
   catch(e){toast(e.message);autoSent='';actionKey='';if(game&&game.phase!=='finished')renderAction();}
-  finally{inFlight--;maybeAuto();}
+  finally{inFlight--;updateMobileControls();maybeAuto();}
 }
 async function poll(){
   if(isRoom()){if(roomReady&&!roomEntering)await roomClient.refresh().catch(e=>toast(e.message));return;}
@@ -188,7 +194,9 @@ async function poll(){
 function render(){
   const activeRoom=isRoom()&&!!roomClient.room&&!!game&&game.phase!=='finished';
   $('mobileRoomBadge').hidden=!activeRoom;$('mobileRoomBadge').textContent=activeRoom?(roomClient.connected?roomClient.room.id:'正在重连'):'';$('mobileRoomBadge').title=activeRoom?'房间码 '+roomClient.room.id:'';
-  $('mobileMatchDock').hidden=!activeRoom;$('mobileResourceMenu').hidden=$('assetSetupNotice').hidden;
+  $('mobileMatchDock').hidden=!game||game.phase==='finished';$('mobileResourceMenu').hidden=$('assetSetupNotice').hidden;
+  $('mobileInvite').hidden=!isRoom();$('mobileLeave').hidden=!isRoom();
+  document.body.dataset.mobilePhase=game?.phase||'idle';updateMobileControls();updateCountdown();
   $('finishButton').hidden=isRoom()&&!isHost();
   recordingStatus.hidden=!game?.recordingEnabled;syncAudioButton.hidden=!game?.recordingEnabled||game.phase==='finished';recordingStatus.textContent=game?.recordingWarning||'视频素材自动记录中';
   document.body.classList.toggle('relay-showing',!!game?.relay?.showcase&&game.relay.showcase.status!=='complete');
@@ -207,10 +215,43 @@ function render(){
   if(canvasKey!==key){const previous=canvasKey.startsWith(`${g.id}-${g.index}-`)?localShapes:[];canvasKey=key;localShapes=structuredClone(g.shapes);drawingHistory.reset();currentStroke=null;animation++;animating=false;$('playbackControls').hidden=true;if(canDraw())productionTrace?.sync(localShapes);if(g.shapes.length&&!g.artistHuman&&g.phase==='ready')animateDrawing(g.shapes,previous);else paint(canvas,localShapes);}
   const drawable=canDraw();$('toolbar').hidden=!drawable;canvas.parentElement.classList.toggle('drawable',drawable);
   $('canvasCaption').textContent=drawable?'你的画布 · 1000 × 650':g.shapes.length?`${g.artistName} 的画布`:'';
-  const status=$('canvasStatus');status.hidden=g.phase!=='drawing-ai';
+  const forfeited=g.phase==='reveal'&&Object.values(g.results).some(r=>r.forfeit);
+  const status=$('canvasStatus');status.hidden=g.phase!=='drawing-ai'&&!forfeited;
   if(g.phase==='drawing-ai')status.innerHTML=`<div class="spinner"></div><span>${esc(g.artistName)} 正在${g.turn>1?'改画':'构思'}…</span><small>模型响应后，会逐笔画出来</small>`;
+  if(forfeited)status.innerHTML='<span>画手未在限时内完成作画</span><small>本题画手 0 分，其余选手各 3 分</small>';
   $('underCanvas').textContent=g.myHint?`只给你的提示：${g.myHint}${g.hint?' · 公开提示：'+g.hint:''}`:g.hint?`画手公开提示：${g.hint}`:drawable?'画图表达题目，不要写答案。支持鼠标和触屏，Ctrl+Z 撤销。':g.phase==='ready'||g.phase==='guessing'?'所有猜手看到的都是这一张画布。':'';
   renderAction();renderGuessers();maybeAuto();
+}
+function updateCountdown(){
+  const timer=$('roundTimer'),clock=game?.clock,active=isRoom()&&clock&&game.phase!=='finished';timer.hidden=!active;if(!active)return;
+  const offset=clock.serverNow-(game.clockReceivedAt||Date.now());
+  const seconds=Math.max(0,Math.ceil((clock.deadline-Date.now()-offset)/1000)),label=`${clock.stage==='draw'?'作画':'猜词'} ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
+  if(timer.textContent!==label)timer.textContent=label;timer.classList.toggle('urgent',seconds<=10);
+}
+function updateMobileControls(){
+  if(!game||game.phase==='finished')return;
+  const g=game,own=g.results?.[myId()],scope=`${g.id}:${g.index}:${g.turn}`;
+  if(scope!==mobileDraftScope){mobileDraftScope=scope;$('mobileGuessInput').value='';}
+  const guessing=g.phase==='guessing'&&own&&!own.solved&&own.status==='waiting';
+  $('mobileGuessForm').hidden=!guessing;$('mobilePrimaryRow').hidden=guessing;
+  let action='',text='',status='';
+  if(g.phase==='drawing'&&canDraw()){action='submit';text='画好了，开始猜';status='轮到你作画';}
+  else if(g.phase==='drawing')status=`${g.artistName} 正在作画`;
+  else if(g.phase==='drawing-ai')status=`${g.artistName} 正在构思…`;
+  else if(g.phase==='ready'){status='画作准备好了';if(isHost()){action='submit';text=animating?'正在落笔…':'开始猜画';}}
+  else if(g.phase==='guessing')status=own?.solved?'你已猜中，等待其他选手':own?.status==='confident'?'答案已提交，等待统一揭晓':'等待大家交卷';
+  else if(g.phase==='locked')status='大家已交卷，即将统一公布答案';
+  else if(g.phase==='review'){status='本轮答案已公布';if(controlsArtist()){action='revise';text=g.artistHuman?'继续补画':'让 AI 补画';}}
+  else if(g.phase==='reveal'){status='答案：'+g.answer;if(isHost()){action='next';text=g.index+1===g.total?'查看结果':'下一题';}}
+  else if(g.phase==='draw-error'){status='AI 作画失败';if(isHost()){action='retry-draw';text='重试作画';}}
+  if(g.mode==='relay'){status='大家正在完成这一棒';const task=g.relay.myTask;if(task?.status==='waiting'&&task.input){action=task.kind==='draw'?'relay-draw-submit':'open-action';text=task.kind==='draw'?'画好了，交卷':'填写接龙答案';}}
+  const connected=!isRoom()||roomClient.connected;
+  $('mobilePhaseStatus').textContent=connected?status:'连接断开，正在重连…';
+  const primary=$('mobilePrimary');primary.hidden=!action;primary.textContent=text;primary.dataset.action=action;primary.disabled=inFlight>0||animating||!connected;
+  for(const element of $('mobileGuessForm').elements)element.disabled=inFlight>0||!connected;
+  const hint=[g.myHint&&'只给你：'+g.myHint,g.hint&&'公开提示：'+g.hint].filter(Boolean).join('\n');
+  $('mobileHint').hidden=!hint;$('mobileHintText').textContent=hint;
+  $('mobileAction').textContent=g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
 }
 function renderRelay(){
   const g=game,task=g.relay.myTask,drawable=canDraw();
@@ -251,9 +292,9 @@ async function animateDrawing(shapes,previous=[]){
     if(!completed)return;
     shown.push(shape);
   }
-  if(token!==animation)return;paint(canvas,shapes);animating=false;companion.update(game,false);playerSeats.update(game,false);$('playbackControls').hidden=true;productionTrace?.emit('drawing-playback',{action:'end',revision:game.revision});maybeAuto();
+  if(token!==animation)return;paint(canvas,shapes);animating=false;companion.update(game,false);playerSeats.update(game,false);$('playbackControls').hidden=true;productionTrace?.emit('drawing-playback',{action:'end',revision:game.revision});updateMobileControls();maybeAuto();
 }
-$('finishDrawingButton').onclick=()=>{productionTrace?.emit('drawing-playback',{action:'skip',revision:game.revision});animation++;animating=false;paint(canvas,localShapes);$('playbackControls').hidden=true;playerSeats.update(game,false);maybeAuto();};
+$('finishDrawingButton').onclick=()=>{productionTrace?.emit('drawing-playback',{action:'skip',revision:game.revision});animation++;animating=false;paint(canvas,localShapes);$('playbackControls').hidden=true;playerSeats.update(game,false);updateMobileControls();maybeAuto();};
 $('playbackSpeed').addEventListener('change',()=>productionTrace?.emit('drawing-playback',{action:'speed',speed:$('playbackSpeed').value}));
 $('pauseSeats').addEventListener('click',()=>productionTrace?.emit('presentation',{action:$('pauseSeats').getAttribute('aria-pressed')==='true'?'pause-characters':'resume-characters'}));
 function maybeAuto(){if(isRoom()&&(!isHost()||!roomClient.connected)||game?.phase!=='ready'||game.artistHuman||!$('autoContinue').checked||animating||inFlight)return;const key=`${game.id}-${game.index}-${game.turn}`;if(autoSent===key)return;autoSent=key;submitCanvas();}
@@ -282,14 +323,14 @@ function renderAction(){
   if(g.phase==='locked')html='<h3>答案已锁定 · 等待揭晓</h3><p>大家都交卷了，似乎都觉得自己稳了…</p><p class="confident-note">✦ 马上公布本轮结果</p>';
   if(g.phase==='review')html=`<h3>还有人没猜中</h3><p>第 ${g.turn} 轮结束。${currentHintMode==='none'?'本局禁止提示，画手只能补画，再让大家猜一次。':currentHintMode==='preset'?'画手可补画，并选择画面区域和观察重点给出固定提示。':g.artistHuman?'可以补画、指出画里的具体内容，或纠正选手的误读。':'让画手参考大家的误读补画，并给出读图提醒。'}</p><button class="primary" data-action="revise">${g.artistHuman?'继续画，再试一次':'让 AI 改画，再猜一次'}</button><div class="button-row"><button data-action="reveal-confirm">公布答案</button></div>`;
   if(g.phase==='draw-error')html=`<h3>${g.drawErrorKind==='format'?'画手返回的笔画格式有误':'画手暂时未能完成作画'}</h3><p class="error-message">${esc(g.notice)}</p>${g.shapes?.length?'<p>上一版画面已保留，重试不会扣除猜题机会。</p>':''}<button class="primary" data-action="retry-draw">${g.turn>1?'重试改画':'重试画图'}</button><div class="button-row"><button data-action="reveal-confirm">跳过本题</button>${g.drawErrorKind==='format'?'':'<button data-action="settings">检查 AI 设置</button>'}</div>`;
-  if(g.phase==='reveal') {const solved=Object.values(g.results).filter(r=>r.solved).length;html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${solved} / ${Object.keys(g.results).length} 位猜中<br>画手本题得 <b>${g.roundGain}</b> 分</p>${banterMarkup(g.banter)}<button class="primary" data-action="next">${banterPending(g.banter)?'跳过剩余互怼，':''}${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`;}
+  if(g.phase==='reveal') {const solved=Object.values(g.results).filter(r=>r.solved&&!r.forfeit).length;html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${solved} / ${Object.keys(g.results).length} 位猜中<br>画手本题得 <b>${g.roundGain}</b> 分</p>${banterMarkup(g.banter)}<button class="primary" data-action="next">${banterPending(g.banter)?'跳过剩余互怼，':''}${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`;}
   if(g.notice&&g.phase!=='draw-error'&&g.phase!=='guessing')html+=`<p class="error-message">${esc(g.notice)}</p>`;
   if(g.phase==='reveal'&&g.recap)html+=`<p class="recap-intro">这题无人猜中，${g.recap.status==='loading'?'大家正在整理复盘…':'复盘已存入对局聊天。'}</p>${recapMarkup(g.recap)}`;
   if(isRoom()){
     if(g.phase==='drawing'&&!myArtist())html=`<h3>${esc(g.artistName)} 正在作画</h3><p>笔画会实时显示在共享画布上。题目只对当前画手可见，画好后大家独立猜词。</p>`;
     if(g.phase==='ready'&&!isHost())html='<h3>画好了，等待开始猜画</h3><p>房主公布画作后，每个人都可以独立提交答案。</p>';
     if(g.phase==='review'&&!controlsArtist())html=`<h3>等待画手补画</h3><p>${esc(g.artistName)} 可以参考误读继续补画，再开始下一轮猜词。</p>`;
-    if(g.phase==='reveal')html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${Object.values(g.results).filter(r=>r.solved).length} / ${Object.keys(g.results).length} 位猜中 · 画手本题 +${g.roundGain} 分</p>${roomBanterMarkup(g.banter)}${isHost()?`<button class="primary" data-action="next">${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`:'<p>等待房主进入下一题。</p>'}${recapMarkup(g.recap)}`;
+    if(g.phase==='reveal')html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${Object.values(g.results).filter(r=>r.solved&&!r.forfeit).length} / ${Object.keys(g.results).length} 位猜中 · 画手本题 +${g.roundGain} 分</p>${roomBanterMarkup(g.banter)}${isHost()?`<button class="primary" data-action="next">${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`:'<p>等待房主进入下一题。</p>'}${recapMarkup(g.recap)}`;
   }
   const scope=JSON.stringify([g.id,g.index,g.turn,g.phase]),keepDraft=scope===actionDraftScope;
   const drafts=keepDraft?[...$('actionPanel').querySelectorAll('textarea[data-hint-text],select[data-hint-region],select[data-hint-focus],#guessInput')].map(input=>({id:input.id,recipient:input.closest('[data-hint-recipient]')?.dataset.hintRecipient,field:input.hasAttribute('data-hint-region')?'region':input.hasAttribute('data-hint-focus')?'focus':'text',value:input.value,focused:input===document.activeElement,start:input.selectionStart,end:input.selectionEnd})):[];
@@ -331,8 +372,8 @@ $('actionPanel').onclick=async e=>{const b=e.target.closest('[data-action]');if(
 };
 $('finishButton').onclick=async()=>{const relay=game?.mode==='relay';if(await confirmAction(relay?'提前结束接龙？':'结束比赛？',relay?'公开所有已经交卷的内容；还在进行的棒次会停止。':'保留已经获得的分数，并查看当前比赛的复盘。',relay?'结束并展开接龙':'结束并复盘'))act('finish');};
 function renderGuessers(){
-  const g=game,entries=Object.values(g.results),solved=entries.filter(r=>r.solved).length;
-  $('guessProgress').textContent=`${solved} / ${entries.length} 已猜中`;
+  const g=game,entries=Object.values(g.results),solved=entries.filter(r=>r.solved&&!r.forfeit).length;
+  $('guessProgress').textContent=entries.some(r=>r.forfeit)?'画手空白超时 · 其余选手各 3 分':`${solved} / ${entries.length} 已猜中`;
   playerSeats.update(g,animating);
   $('privacyNote').textContent=g.phase==='reveal'?'本题结束，所有答案已公开。':(!isRoom()&&g.artistHuman||isRoom()&&myArtist())?'画手可以参考错误答案来改画。':!g.players.some(p=>p.human)?'观战中：已判分的猜词与理由会显示在气泡和聊天中。':'所有人交卷后公布本轮答案 · 百分比为 AI 自报把握';
 }
@@ -363,7 +404,7 @@ function renderResults(){
   const ranking=[...g.players].sort((a,b)=>b.total-a.total);
   const best=(field,denom)=>{const eligible=g.players.filter(p=>p[denom]>0);if(!eligible.length)return {name:'暂无',rate:'—'};const value=Math.max(...eligible.map(p=>p[field]/p[denom]));return {name:eligible.filter(p=>p[field]/p[denom]===value).map(p=>p.name).join('、'),rate:`${Math.round(value*100)}%`};};
   const draw=best('drawScore','drawPossible'),guess=best('guessScore','guessPossible'),max=ranking[0].total,winners=ranking.filter(p=>p.total===max).map(p=>p.name).join('、');
-  $('results').innerHTML=`<div class="results-head"><div><p class="eyebrow">比赛结束 · ${g.history.length} 幅脑洞作品</p><h1>这一局，谁赢了？</h1></div><div class="result-actions"><a id="exportButton" class="quiet download-link" href="/api/export" download="draw-guess-replay.json">导出复盘</a><button id="homeButton" class="primary">再来一局</button></div></div><div class="awards"><article class="award"><small>总冠军 ✦</small><strong>${esc(winners)}</strong><p>${max} 分 · 总分最高</p></article><article class="award"><small>最佳画手 ✎</small><strong>${esc(draw.name)}</strong><p>${draw.rate} · 作画得分 / 可得满分</p></article><article class="award"><small>最佳猜手 ◇</small><strong>${esc(guess.name)}</strong><p>${guess.rate} · 猜题得分 / 可得满分</p></article></div><div class="table-wrap"><table><thead><tr><th>名次</th><th>选手</th><th>总分</th><th>画图分</th><th>猜题分</th><th>猜中题数</th><th>画了几幅</th></tr></thead><tbody>${ranking.map((p,i)=>`<tr><td>${i+1}</td><td>${esc(playerLabel(p))}</td><td><b>${p.total}</b></td><td>${p.drawScore} <small> / ${p.drawPossible}</small></td><td>${p.guessScore} <small> / ${p.guessPossible}</small></td><td>${p.hits} / ${p.guessPossible/3}</td><td>${p.drawn}</td></tr>`).join('')}</tbody></table></div><h2 class="gallery-heading">每一幅画</h2><div class="gallery">${g.history.map((r,i)=>`<article class="gallery-card"><canvas width="1000" height="650" id="gallery-${i}" aria-label="${esc(r.answer)}的画作"></canvas><div class="gallery-info"><h3>${esc(r.answer)}</h3><p>${esc(r.artistName)} · 画手 +${r.drawGain} 分</p>${g.players.filter(p=>r.results[p.id]).map(p=>{const v=r.results[p.id];return `<div class="gallery-guess"><span>${esc(playerLabel(p))}${p.id===r.artistId?'（盲猜）':''}</span><b>${v.solved?`第 ${v.history.find(h=>h.correct)?.turn} 次猜中 · +${v.points}`:'未猜中'}</b></div>`;}).join('')}<details><summary>查看猜题记录</summary>${g.players.filter(p=>r.results[p.id]).map(p=>`<p><b>${esc(p.name)}</b>：${r.results[p.id].history.map(h=>`${h.guess?esc(h.guess):'跳过'}${h.correct?' ✓':' ×'}`).join('；')||'未作答'}</p>`).join('')}</details>${recapMarkup(r.recap)}</div></article>`).join('')}</div>`;
+  $('results').innerHTML=`<div class="results-head"><div><p class="eyebrow">比赛结束 · ${g.history.length} 幅脑洞作品</p><h1>这一局，谁赢了？</h1></div><div class="result-actions"><a id="exportButton" class="quiet download-link" href="/api/export" download="draw-guess-replay.json">导出复盘</a><button id="homeButton" class="primary">再来一局</button></div></div><div class="awards"><article class="award"><small>总冠军 ✦</small><strong>${esc(winners)}</strong><p>${max} 分 · 总分最高</p></article><article class="award"><small>最佳画手 ✎</small><strong>${esc(draw.name)}</strong><p>${draw.rate} · 作画得分 / 可得满分</p></article><article class="award"><small>最佳猜手 ◇</small><strong>${esc(guess.name)}</strong><p>${guess.rate} · 猜题得分 / 可得满分</p></article></div><div class="table-wrap"><table><thead><tr><th>名次</th><th>选手</th><th>总分</th><th>画图分</th><th>猜题分</th><th>猜中题数</th><th>画了几幅</th></tr></thead><tbody>${ranking.map((p,i)=>`<tr><td>${i+1}</td><td>${esc(playerLabel(p))}</td><td><b>${p.total}</b></td><td>${p.drawScore} <small> / ${p.drawPossible}</small></td><td>${p.guessScore} <small> / ${p.guessPossible}</small></td><td>${p.hits} / ${p.guessPossible/3}</td><td>${p.drawn}</td></tr>`).join('')}</tbody></table></div><h2 class="gallery-heading">每一幅画</h2><div class="gallery">${g.history.map((r,i)=>`<article class="gallery-card"><canvas width="1000" height="650" id="gallery-${i}" aria-label="${esc(r.answer)}的画作"></canvas><div class="gallery-info"><h3>${esc(r.answer)}</h3><p>${esc(r.artistName)} · 画手 +${r.drawGain} 分</p>${g.players.filter(p=>r.results[p.id]).map(p=>{const v=r.results[p.id];return `<div class="gallery-guess"><span>${esc(playerLabel(p))}${p.id===r.artistId?'（盲猜）':''}</span><b>${v.forfeit?`画手空白超时 · +${v.points}`:v.solved?`第 ${v.history.find(h=>h.correct)?.turn} 次猜中 · +${v.points}`:'未猜中'}</b></div>`;}).join('')}<details><summary>查看猜题记录</summary>${g.players.filter(p=>r.results[p.id]).map(p=>`<p><b>${esc(p.name)}</b>：${r.results[p.id].history.map(h=>`${h.guess?esc(h.guess):'跳过'}${h.correct?' ✓':' ×'}`).join('；')||'未作答'}</p>`).join('')}</details>${recapMarkup(r.recap)}</div></article>`).join('')}</div>`;
   g.history.forEach((r,i)=>paint($(`gallery-${i}`),r.shapes));
   $('results').querySelectorAll('.gallery-info').forEach((el,i)=>el.insertAdjacentHTML('beforeend',banterMarkup(g.history[i].banter,{controls:false})));
   if(isRoom()){$('exportButton').href='/api/export?id='+encodeURIComponent(g.id);$('homeButton').textContent=isHost()?'准备下一局':'等待房主再开一局';$('homeButton').disabled=!isHost();}
@@ -426,3 +467,5 @@ let pollTick=0;setInterval(()=>{if(!isRoom()||++pollTick%5===0)poll();},950);
 window.addEventListener('online',()=>{if(isRoom())enterRoomMode();else poll();});
 window.addEventListener('pagehide',()=>roomClient.suspend());
 
+
+const countdownTick=setInterval(()=>{if(!document.hidden)updateCountdown();},250);addEventListener('pagehide',()=>clearInterval(countdownTick),{once:true});

@@ -54,7 +54,7 @@ for(const file of ['production.html','production.css','production.mjs','producti
 for(const file of ['online.html','online.css','online.mjs'])allowedFiles.set('/'+file,file);
 allowedFiles.set('/avatar-loader.mjs','avatar-loader.mjs');
 allowedFiles.set('/online','online.html');
-const types={html:'text/html; charset=utf-8',mjs:'text/javascript; charset=utf-8',js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json; charset=utf-8',png:'image/png',moc3:'application/octet-stream',vert:'text/plain; charset=utf-8',frag:'text/plain; charset=utf-8',ttf:'font/ttf',txt:'text/plain; charset=utf-8'};
+const types={html:'text/html; charset=utf-8',mjs:'text/javascript; charset=utf-8',js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json; charset=utf-8',png:'image/png',webp:'image/webp',avif:'image/avif',moc3:'application/octet-stream',vert:'text/plain; charset=utf-8',frag:'text/plain; charset=utf-8',ttf:'font/ttf',txt:'text/plain; charset=utf-8'};
 // Only explicitly published runtime assets are served; never follow symlinks or expose .local/source files.
 async function registerAssets(dir){for(const item of await readdir(join(ROOT,'public',dir),{withFileTypes:true})){const file=dir+'/'+item.name;if(item.isDirectory())await registerAssets(file);else if(item.isFile()&&types[item.name.split('.').pop()])allowedFiles.set('/'+file,file);}}
 await registerAssets('vendor');await registerAssets('models');await registerAssets('fonts');
@@ -67,7 +67,7 @@ const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url,'http://'+host),path=url.pathname;
     req.user=online.accounts.authenticate(req);
     if(req.method==='GET'&&['/','/index.html'].includes(path)&&!req.user){const invite=url.searchParams.get('room');res.writeHead(302,{Location:invite?'/online?room='+encodeURIComponent(invite):'/online'});return res.end();}
-    if(req.method==='GET'&&allowedFiles.has(path)){const file=allowedFiles.get(path);res.writeHead(200,{'Content-Type':types[file.split('.').pop()],'Cache-Control':'no-cache'});return res.end(await readFile(join(ROOT,'public',file)));}
+    if(req.method==='GET'&&allowedFiles.has(path)){const file=allowedFiles.get(path);res.writeHead(200,{'Content-Type':types[file.split('.').pop()],'Cache-Control':/^\/(models|vendor|fonts)\//.test(path)&&/\.(png|webp|avif|moc3|ttf|js)$/.test(file)?'public, max-age=86400':'no-cache'});return res.end(await readFile(join(ROOT,'public',file)));}
     if(!path.startsWith('/api/'))return json(res,{error:'未找到。'},404);
     if(req.method==='POST') {
       if(req.headers['x-game-request']!=='1'||!req.headers['content-type']?.includes('application/json'))return json(res,{error:'请求来源无效。'},403);

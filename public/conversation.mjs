@@ -3,6 +3,8 @@ export const escapeText=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 const esc=escapeText;
 export const matchNote=match=>({'idiom-order':'四个字齐全，顺序不同也算对','idiom-three':'三个字位置正确，也算对'})[match]||'';
 export function messageLabel(message){
+  if(message.kind==='forfeit')return '超时判分';
+  if(message.kind==='guess'&&message.timedOut)return '作答超时';
   if(message.kind==='banter')return `${message.reply?'回嘴':'互怼'} → ${message.targetName||'对方'}`;
   if(message.mode==='relay')return ({'relay-round':'接龙进度','relay-status':'交卷','relay-guess':'接龙猜词','relay-reveal':'拆开接龙','relay-vote':'投票','relay-reflection':'通关感言'})[message.kind]||'接龙';
   return ({round:'新题目',answer:'揭晓',guess:message.skipped?'跳过':'猜词',hint:message.recipientId?`只对 ${message.recipientName||'你'} 说`:'公开提示',recap:message.source==='model'?'一句话复盘':'记录摘要'})[message.kind]||'消息';

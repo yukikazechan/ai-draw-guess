@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createCanvas} from '@napi-rs/canvas';
 import {paint,floodFill,DrawingHistory,W,H} from '../public/drawing.mjs';
 import {validateShapes} from '../lib/shapes.mjs';
-import {renderRelayDrawing} from '../lib/relay-renderer.mjs';
+import {renderRelayDrawing,drawingHasInk} from '../lib/relay-renderer.mjs';
 import {drawingSVG} from '../lib/production-export.mjs';
 import {tablePlaces} from '../public/seat-presentation.mjs';
 import {RoomGame,Rooms} from '../lib/rooms.mjs';
@@ -36,6 +36,19 @@ test('bucket coordinates follow the canvas scale and connected fill handles edge
   assert.equal(floodFill(data,4,4,0,0,'#ffffff'),0);
   assert.equal(floodFill(data,4,4,0,0,'#000000'),16);
   assert.equal(floodFill(data,4,4,-1,0,'#ff0000'),0);
+  assert.equal(drawingHasInk([]),false);assert.equal(drawingHasInk([{type:'bucket',x:0,y:0,color:'#ffffff'}]),false);assert.equal(drawingHasInk([outline]),true);
+});
+
+test('blank redraw timeout resets only this artist question and tops opponents up to three without double awards',async()=>{
+  const g=new RoomGame({players:[],humans:['a','b','c'].map(id=>({id,name:id,human:true})),human:false,mode:'battle',category:'动物',orderRandom:n=>n-1});
+  try{
+    await g.next();g.turn=2;g.artist.drawScore=7;g.roundGain=2;
+    g.players.find(p=>p.id==='b').guessScore=10;g.results.b.points=2;g.results.b.solved=true;
+    g.forfeitDrawing();
+    assert.equal(g.artist.drawScore,5);assert.equal(g.roundGain,0);assert.equal(g.players.find(p=>p.id==='b').guessScore,11);assert.equal(g.players.find(p=>p.id==='c').guessScore,3);
+    assert.equal(g.results.b.points,3);assert.equal(g.results.c.points,3);assert(g.snapshot('b').results.b.forfeit);
+    const html=roundAnswerMarkup(g.snapshot('c').results.c.history);assert(html.includes('画手空白超时'));assert(html.includes('+3'));
+  }finally{g.finish();}
 });
 
 test('all eight humans and five AI have distinct places with the viewer reserved at south',()=>{
@@ -100,7 +113,7 @@ test('mobile seats support gesture snapping without page buttons and survive des
   let mediaChanged,rafId=0;const frames=new Map(),media={matches:true,addEventListener(_name,fn){mediaChanged=fn;}};
   const events={},pages={children:[],replaceChildren(){this.children=[];},append(node){this.children.push(node);}},count={textContent:''},track={append(node){node.parentElement=this;}},home={querySelector(){return null;},insertBefore(node){node.parentElement=this;}};
   const container={parentElement:home,clientWidth:340,scrollLeft:0,style:{},setAttribute(){},setPointerCapture(){},addEventListener(name,fn){events[name]=fn;},scrollTo({left}){this.scrollLeft=Math.max(0,left);events.scroll?.();}};
-  const section={querySelector(selector){return {'[data-roster-pages]':pages,'[data-roster-count]':count,'[data-roster-track]':track}[selector];}};
+  const section={dataset:{},querySelector(selector){return {'[data-roster-pages]':pages,'[data-roster-count]':count,'[data-roster-track]':track}[selector];}};
   globalThis.matchMedia=query=>query.includes('reduced-motion')?{matches:true}:media;
   globalThis.document={createElement:tag=>({tag,dataset:{}})};
   globalThis.requestAnimationFrame=fn=>{frames.set(++rafId,fn);return rafId;};globalThis.cancelAnimationFrame=id=>frames.delete(id);globalThis.addEventListener=()=>{};
@@ -113,4 +126,34 @@ test('mobile seats support gesture snapping without page buttons and survive des
   roster.update({...game,updated:2});flush();assert.equal(container.scrollLeft,348);
   events.keydown({target:container,key:'ArrowRight',preventDefault(){}});flush();assert.equal(count.textContent,'3 / 3');
   media.matches=false;mediaChanged();assert.equal(container.parentElement,home);assert.equal(section.hidden,true);
+});
+
+test('server drawing deadline stays fixed while strokes arrive and submits the existing image on expiry',async()=>{
+  const users=['a','b'].map(id=>({id,name:id}));
+  const rooms=new Rooms({accounts:{charge(){},own(){}},recordings:{attach(){}},makeOptions:()=>({players:[],category:'动物',rounds:1,orderRandom:n=>n-1})});
+  try{
+    rooms.create(users[0]);const room=rooms.require(users[0]);rooms.join(users[1],room.id);
+    await rooms.start(users[0],{drawSeconds:60,guessSeconds:20});const g=room.game,deadline=g.clock.deadline;
+    rooms.drawing(users[0],{gameId:g.id,index:g.index,turn:g.turn,shapes:[outline,bucket]});
+    assert.equal(g.clock.deadline,deadline);assert.equal(g.snapshot('b').clock.duration,60);
+    g.clock.deadline=Date.now()-1;rooms.expire(room);await new Promise(r=>setImmediate(r));
+    assert.equal(g.phase,'guessing');assert.equal(g.clock.stage,'guess');assert.equal(g.clock.duration,20);assert.equal(g.shapes[1].type,'bucket');
+    g.reveal();await g.next();assert.equal(g.artist.id,'b');g.clock.deadline=Date.now()-1;rooms.expire(room);
+    assert.equal(g.phase,'reveal');assert.match(g.notice,/画手 0 分/);assert.equal(g.clock,null);assert.equal(g.artist.drawScore,0);assert.equal(g.players.find(p=>p.id==='a').guessScore,3);
+  }finally{rooms.close();}
+});
+
+test('player guess deadline gives missing humans zero while AI keeps its own request timeout',async()=>{
+  const users=['a','b','c'].map(id=>({id,name:id}));let reply;
+  const rooms=new Rooms({accounts:{charge(){},own(){}},recordings:{attach(){}},makeOptions:()=>({players:[{id:'ai',name:'AI',provider:'compatible'}],category:'动物',rounds:1,orderRandom:n=>n-1,run:()=>new Promise(resolve=>{reply=resolve;})})});
+  try{
+    rooms.create(users[0]);const room=rooms.require(users[0]);for(const u of users.slice(1))rooms.join(u,room.id);
+    await rooms.start(users[0],{drawSeconds:90,guessSeconds:30});const g=room.game;
+    const pending=rooms.action(users[0],{gameId:g.id,index:g.index,turn:g.turn,action:'draw-done',shapes:[outline]});
+    g.humanGuess('乙的答案',false,'b');g.clock.deadline=Date.now()-1;rooms.expire(room);
+    assert.equal(g.phase,'guessing');assert(g.results.c.pending.skipped);assert(g.results.c.pending.timedOut);assert.equal(g.results.ai.pending,undefined);assert.equal(g.results.ai.status,'thinking');assert.equal(g.controller.signal.aborted,false);assert.equal(g.results.b.pending.guess,'乙的答案');assert.equal(g.clock,null);
+    reply({guess:g.word.answer,confidence:100});await pending;g.publishGuesses();
+    assert.equal(g.results.ai.history.length,1);assert(!g.results.ai.history[0].skipped);assert.equal(g.players.find(p=>p.id==='ai').guessScore,3);
+    const snapshot=g.snapshot('c');assert.equal(snapshot.results.b.history[0].guess,'乙的答案');assert.equal(g.clock,null);
+  }finally{rooms.close();}
 });
