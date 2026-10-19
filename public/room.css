@@ -122,6 +122,121 @@ input,textarea{caret-color:#344fd2}::selection{background:#ced8ff;color:#182443}
 .round-timer{padding:7px 11px;border:1px solid #b8cbe4;border-radius:8px;background:#f3f8ff;color:#294b76;font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
 .round-timer.urgent{background:#fff0f2;color:#a92340;border-color:#d7a0ac}
 .room-time-limits label{display:flex;gap:8px;align-items:center;font-size:14px;color:#455773}
+
+/* Lobby invitations and the selected models share the room's existing visual language. */
+.room-mode:not(.arena-board) .room-bar{padding:22px 24px;border:1px solid #cbd7e8;border-radius:14px;background:#fff}
+.room-invite-action{display:flex;flex-direction:column;align-items:center;gap:7px}
+.room-invite-action>span{font-size:13px;color:#58677f;line-height:1.4}
+.room-bar #copyRoom{font-size:16px;padding:12px 23px;min-height:44px}
+.room-member-heading{display:flex;align-items:baseline;gap:12px;margin-top:22px}
+.room-member-heading h3{font-size:16px;margin:0;color:#263e60}
+.room-member-heading>span{font-size:14px;color:#455773;font-variant-numeric:tabular-nums}
+.room-bar .room-members,.room-dialog .room-members{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}
+.room-members .room-member{display:flex;align-items:center;gap:11px;min-width:160px;padding:11px 15px;border:1px solid #cbd7e8;border-radius:12px;background:#f7faff;font-size:15px}
+.room-members .room-member.is-self{border-color:#8ea5cd;background:#edf3ff}
+.room-member-avatar{display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:10px;background:#dce6f8;color:#294b76;font-size:17px;font-weight:800}
+.room-member-copy{min-width:0}
+.room-member-copy>strong{display:block;font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+.room-member-copy>div{display:flex;gap:9px;align-items:center;margin-top:4px}
+.member-presence{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#58677f}
+.member-presence::before{content:'';width:6px;height:6px;border-radius:50%;background:#7e8aa0}
+.member-presence.is-online{color:#246241}
+.member-presence.is-online::before{background:#258458}
+.member-host{font-size:12px;line-height:1.3;padding:2px 6px;background:#e3eafe;border-radius:4px;color:#314a97}
+.arena-board .room-member-heading,.arena-board .room-invite-action>span{display:none}
+.arena-board .room-members .room-member{min-width:0;padding:5px 9px;gap:7px}
+.arena-board .room-member-avatar{width:24px;height:24px;border-radius:6px;font-size:13px}
+.arena-board .room-member-copy>strong{font-size:12px}
+.arena-board .room-member-copy>div{margin-top:0;gap:5px}
+.arena-board .room-bar #copyRoom{font-size:12px;padding:7px 11px;min-height:0}
+.room-dialog{width:min(620px,94vw)}
+.room-dialog .dialog-head h2{font-size:24px;margin:0}
+.room-dialog h2 span{font-size:15px;color:#58677f;font-weight:400}
+#roomDialogCode{font-size:15px;color:#455773;user-select:all}
+.room-dialog>label{display:block;margin:24px 0 10px;font-size:15px;font-weight:700}
+.room-invite-row{display:flex;align-items:center;gap:8px}
+.room-invite-row input{min-width:0;flex:1;font-size:14px}
+.room-invite-row button{flex:none}
+.room-dialog-help{font-size:14px;line-height:1.7;color:#58677f;margin-bottom:0}
+.selected-ai-preview{margin:26px 0 30px}
+.selected-ai-preview>header{display:flex;align-items:center;gap:12px}
+.selected-ai-preview h2{font-size:23px;margin:0;color:#263e60}
+.selected-ai-preview>header>span{font-size:14px;color:#455773;font-variant-numeric:tabular-nums}
+.selected-ai-preview>p{font-size:14px;line-height:1.8;color:#58677f;margin:8px 0 18px}
+.selected-ai-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:14px;align-items:stretch}
+.selected-ai-grid .player-seat{display:flex;flex-direction:column;height:auto;min-width:0;border:1px solid #cbd7e8;border-radius:12px;background:#fff;overflow:hidden;box-shadow:none}
+.selected-ai-grid .player-seat>header{padding:14px 14px 0;font-size:16px}
+.selected-ai-grid .seat-name{font-size:17px;line-height:1.4}
+.selected-ai-grid .seat-model{font-size:12px;color:#58677f;overflow-wrap:anywhere}
+.selected-ai-grid .seat-stage{height:180px;min-height:180px;background:transparent;margin-top:5px}
+.selected-ai-grid .seat-stage canvas{width:100%;height:100%;display:block;background:transparent}
+.selected-ai-grid .seat-caption{margin-top:auto;border-top:1px solid #dce6f0;padding:10px 12px;background:#f7faff;font-size:12px}
+.selected-ai-grid .seat-answers:empty,.selected-ai-grid .seat-feedback:empty{display:none}
+
+/* An expanded chat owns the available height; arena preview caps do not apply. */
+dialog.panel-drawer[data-active-panel=chat]{width:min(1080px,94vw);height:min(78dvh,850px)}
+.panel-drawer[data-active-panel=chat] .drawer-content{display:flex;flex-direction:column;overflow:hidden;padding:16px}
+.panel-drawer #conversationPanel[data-panel-expanded]{display:flex;flex-direction:column;flex:1;min-height:0;height:auto;margin:0;border:0;border-radius:10px;background:white;box-shadow:none}
+.panel-drawer #conversationPanel .chat-heading{flex:none;padding:13px 18px;gap:10px}
+.panel-drawer #conversationPanel .chat-heading h3,.panel-drawer #conversationPanel .chat-heading select{font-size:16px}
+.panel-drawer #conversationPanel .chat-log{flex:1;min-height:0;max-height:none;overflow-y:auto;padding:8px 18px}
+.panel-drawer #conversationPanel .chat-message{font-size:17px;line-height:1.8;padding:14px 3px}
+.panel-drawer #conversationPanel .speech-guess strong{font-size:19px}
+.panel-drawer #conversationPanel .speech-reason{font-size:16px}
+.panel-drawer #conversationPanel .chat-round,.panel-drawer #conversationPanel .chat-kind,.panel-drawer #conversationPanel .chat-model,.panel-drawer #conversationPanel .speech-verdict{font-size:13px}
+.panel-drawer #conversationPanel .chat-message.chat-round,.panel-drawer #conversationPanel .chat-message.chat-answer{font-size:17px}
+.panel-drawer #conversationPanel>footer{flex:none;margin-top:auto;padding:12px 18px;font-size:13px}
+.panel-drawer #conversationPanel .chat-empty{flex:1;margin:20px;font-size:16px}
+.banter-composer{flex:none;padding:12px;border-top:1px solid #cbd7e8;background:#f7faff}
+.banter-composer-form>label{display:block;font-size:14px;font-weight:700;color:#344465;margin-bottom:8px}
+.banter-compose-row{display:grid;grid-template-columns:minmax(95px,130px) minmax(0,1fr) auto;gap:7px;align-items:center}
+.banter-compose-row input,.banter-compose-row select{min-width:0;width:100%;font-size:14px;padding:9px}
+.banter-compose-row button{font-size:13px;padding:10px 12px;white-space:nowrap}
+.banter-composer-form>small{display:block;font-size:12px;color:#58677f;line-height:1.6;margin-top:7px}
+.panel-drawer #conversationPanel .banter-composer{padding:14px 18px}
+.panel-drawer #conversationPanel .banter-compose-row{grid-template-columns:minmax(120px,160px) minmax(0,1fr) auto}
+.panel-drawer #conversationPanel .banter-composer input,.panel-drawer #conversationPanel .banter-composer select{font-size:16px}
+.banter-composer-trigger{margin-top:10px}
+.arena-board .action-panel .guess-form .guess-submit{min-width:112px;min-height:44px;padding:11px 18px;font-size:15px;flex:none}
+.arena-board .action-panel .guess-form .guess-pass,.panel-drawer .action-panel .guess-form .guess-pass{min-width:0;min-height:36px;padding:8px 11px;font-size:13px;background:transparent;border-color:transparent;color:#58677f;flex:none}
+.panel-drawer .action-panel .guess-form .guess-submit{min-width:120px;padding:12px 20px}
+.panel-drawer .action-panel .guess-form .guess-pass{font-size:14px!important}
+#mobileGuessForm .guess-pass{min-height:34px;padding:7px 8px;font-size:13px;border-color:transparent;background:transparent;color:#58677f;flex:none;white-space:nowrap}
+#mobileGuessForm .primary{min-width:90px;flex:none}
+@media(max-width:800px){
+  .room-mode:not(.arena-board) .room-bar{padding:18px 16px}
+  .room-member-heading{margin-top:18px;flex-wrap:wrap;gap:6px 12px}
+  .room-members .room-member{min-width:0;flex:1 1 145px;padding:10px;max-width:100%}
+  .room-invite-action{flex:1;align-items:stretch}
+  .room-invite-action>span{text-align:center;font-size:12px}
+  .room-bar #copyRoom{font-size:15px;padding:11px 16px}
+  .room-dialog{padding:20px}
+  .room-dialog .dialog-head h2{font-size:22px}
+  .room-invite-row{flex-wrap:wrap}
+  .room-invite-row input{flex-basis:100%;font-size:16px}
+  .room-invite-row button{width:100%}
+  .arena-board .mobile-room-badge{margin-left:auto;padding:6px 8px;border:1px solid #cbd7e8;border-radius:7px;background:#fff;color:#294b76;font-size:12px;font-weight:700;white-space:nowrap}
+  .selected-ai-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .selected-ai-grid .seat-stage{height:155px;min-height:155px}
+  .selected-ai-grid .player-seat>header{padding:10px 10px 0}
+  .selected-ai-grid .seat-name{font-size:16px}
+  .selected-ai-preview h2{font-size:21px}
+  dialog.panel-drawer[data-active-panel=chat]{width:100vw;height:88dvh}
+  .panel-drawer[data-active-panel=chat] .drawer-content{padding:10px}
+  .panel-drawer #conversationPanel .chat-message{font-size:16px}
+  .panel-drawer #conversationPanel .chat-message.chat-round,.panel-drawer #conversationPanel .chat-message.chat-answer{font-size:16px}
+  .panel-drawer #conversationPanel .chat-heading{padding:10px 12px}
+  .panel-drawer #conversationPanel .chat-log{padding:6px 12px}
+  .panel-drawer #conversationPanel>footer{padding:9px 12px;font-size:12px;gap:6px}
+  .banter-compose-row,.panel-drawer #conversationPanel .banter-compose-row{grid-template-columns:minmax(0,1fr) auto}
+  .banter-compose-row select{grid-column:1/-1}
+  .banter-compose-row input{grid-column:1;font-size:16px}
+  .banter-compose-row button{grid-column:2}
+  .panel-drawer #conversationPanel .banter-composer{padding:10px 12px}
+  .panel-drawer .action-panel .guess-form{flex-wrap:wrap;gap:8px}
+  .panel-drawer .action-panel .guess-form input{flex-basis:100%}
+  .panel-drawer .action-panel .guess-form .guess-submit{flex:1}
+}
 @media(max-width:800px){
   .arena-board #assetSetupNotice{display:none}
   .arena-board .topbar{min-height:52px;margin-bottom:10px;padding:8px 0;flex-wrap:nowrap;gap:8px}

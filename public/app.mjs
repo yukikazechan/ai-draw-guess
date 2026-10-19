@@ -3,7 +3,6 @@ import {chosenEffort,waitSeconds} from './reasoning.mjs';
 import {hintControl,visualHint,HINT_MODES,hintModeInfo} from './visual-hints.mjs';
 import {updateArenaLayout} from './seat-presentation.mjs';
 import {W,H,paint,png,drawShape,DrawingHistory} from './drawing.mjs';
-import {createCompanion} from './avatar-game.mjs';
 import {createPlayerSeats} from './player-seats.mjs';
 import {createConversation,recapMarkup} from './conversation.mjs';
 import {drawingTransition,playbackFactor,strokeDuration,animateProgress,partialStroke} from './drawing-playback.mjs';
@@ -11,7 +10,7 @@ import {CHARACTERS,CHARACTER_MAP,playerLabel,playerModelLabel} from './character
 import {mountModelPicker,sameSetup,connectionIssue} from './model-picker.mjs';
 import {relayActionMarkup,relayStageMarkup,renderRelayResults} from './relay-view.mjs';
 import {createRelayShowcase} from './relay-view.mjs';
-import {banterMarkup,banterPending,bindBanterControls,captureBanterDraft,restoreBanterDraft} from './banter-view.mjs';
+import {banterMarkup,banterPending,banterComposerMarkup,bindBanterControls,captureBanterDraft,restoreBanterDraft} from './banter-view.mjs';
 import {createRoomClient} from './room-client.mjs';
 import {createMobileRoster} from './mobile-roster.mjs';
 
@@ -20,7 +19,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 let config=null,game=null,mode='battle',human=true,category='成语',idiomLevel='easy',rounds=1,selected=new Set(),localShapes=[],color='#202633',erasing=false,currentStroke=null;
 let canvasKey='',actionKey='',resultKey='',animation=0,animating=false,inFlight=0,autoSent='',toastTimer,polling=false,online=true;
 let modelCatalog=null,actionDraftScope='',hintMode='visual';
-let productionTrace=null,bucket=false,mobileDraftScope='';
+let productionTrace=null,bucket=false,mobileDraftScope='',banterComposerKey='';
 let roomReady=false,roomEntering=false,roomLoading=false,lastRoomId='',roomLobbyKey='',roomStatus='正在连接房间…';
 const roomClient=createRoomClient({request:api,onChange:receiveRoom,onError:toast,onConnection:(connected,text)=>{roomStatus=text;$('roomConnection').textContent=text;document.body.classList.toggle('room-disconnected',mode==='online'&&!!roomClient.room&&!connected);if(config&&mode==='online'){actionKey='';render();}}});
 const isRoom=()=>mode==='online';
@@ -32,17 +31,18 @@ try{const saved=localStorage.getItem('drawguess.hintMode');if(HINT_MODES.some(it
 const lobbyIntro={heading:document.querySelector('.intro h1').innerHTML,text:document.querySelector('.intro-text').innerHTML,note:document.querySelector('.rule-note').innerHTML};
 const canvas=$('canvas');
 const drawingHistory=new DrawingHistory();
-const companion=createCompanion();
 const preparation=document.createElement('div');preparation.className='lobby-preparation';preparation.innerHTML='<span id="characterPreparation" role="status" aria-live="polite"></span><button class="quiet" id="retryCharacterPreparation" hidden>重试未加载角色</button>';document.querySelector('.setup-panel').append(preparation);
-const playerSeats=createPlayerSeats($('guessers'),{onPreparation:({total,ready,failed})=>{
+const playerSeats=createPlayerSeats($('guessers'),{previewContainer:$('selectedAiGrid'),onPreparation:({total,ready,failed})=>{
+  $('selectedAiCount').textContent=`${total} 位 AI`;$('selectedAiEmpty').hidden=total>0;$('selectedAiGrid').hidden=total===0;
   $('characterPreparation').textContent=!total?'选择 AI 后会提前准备角色。':ready===total?`参赛角色已就绪 ${ready} / ${total} · 进场直接显示`:`正在准备参赛角色 ${ready} / ${total}${failed?` · ${failed} 位未加载成功`:''} · 可以继续选择比赛`;
   preparation.dataset.ready=String(total>0&&ready===total);$('retryCharacterPreparation').hidden=!failed;
 }});
 $('retryCharacterPreparation').onclick=()=>playerSeats.retryPrepared();
 const conversation=createConversation($('conversationPanel'));
+const banterComposer=document.createElement('div');banterComposer.className='banter-composer';banterComposer.hidden=true;$('conversationPanel').insertBefore(banterComposer,$('conversationPanel').querySelector('footer'));bindBanterControls(banterComposer,act);
 const mobileRoster=createMobileRoster({container:$('guessers'),section:$('mobileRoster'),home:document.querySelector('.play-sidebar')});
 bindBanterControls($('actionPanel'),act);bindBanterControls($('results'),act);
-document.querySelector('.final-setup').insertAdjacentHTML('beforebegin','<div class="setup-row banter-setting"><span class="row-label">赛后互动</span><div><label class="check"><input type="checkbox" id="banterEnabled" checked> 开启赛后互怼</label><p class="hint-mode-help">答案或本链接龙投票揭晓后，随机点名互怼；被点名必须接话，你可以亲自回嘴。每次最多两组，可随时跳过。</p></div></div>');
+document.querySelector('.final-setup').insertAdjacentHTML('beforebegin','<div class="setup-row banter-setting"><span class="row-label">赛后互动</span><div><label class="check"><input type="checkbox" id="banterEnabled" checked> 开启赛后互怼</label><p class="hint-mode-help">答案揭晓后，AI 可能根据真实作答点名；你也可以在聊天里 @ AI 发起互怼。自动最多两组，可随时跳过。</p></div></div>');
 try{$('banterEnabled').checked=localStorage.getItem('drawguess.banter')!=='false';}catch{}
 $('banterEnabled').onchange=()=>{try{localStorage.setItem('drawguess.banter',String($('banterEnabled').checked));}catch{}};
 const banterFilter=document.createElement('option');banterFilter.value='banter';banterFilter.textContent='互怼与回应';$('conversationPanel').querySelector('select').append(banterFilter);
@@ -57,8 +57,13 @@ $('pauseSeats').onclick=()=>{const button=$('pauseSeats'),paused=button.getAttri
 $('mobilePauseSeats').onclick=()=>$('pauseSeats').click();
 $('mobileInvite').onclick=()=>$('copyRoom').click();
 $('mobileLeave').onclick=()=>$('leaveRoom').click();
+$('mobileRoomBadge').onclick=()=>{if(!roomClient.room)return;renderRoomMembers(roomClient.room);$('roomDialog').showModal();};
+$('closeRoomDialog').onclick=()=>$('roomDialog').close();
+$('roomDialogCopy').onclick=()=>$('copyRoom').click();
+$('roomInviteUrl').onfocus=e=>e.target.select();
 $('mobileChat').onclick=()=>$('conversationPanel').querySelector('.panel-expand')?.click();
 $('mobileAction').onclick=()=>$('actionPanel').querySelector('.panel-expand')?.click();
+$('mobilePass').onclick=()=>act('pass');
 $('mobileGuessForm').onsubmit=e=>{e.preventDefault();const guess=$('mobileGuessInput').value.trim();if(guess)act('guess',{guess});};
 $('mobilePrimary').onclick=()=>{const action=$('mobilePrimary').dataset.action;if(action==='submit')submitCanvas();else if(action==='open-action')$('mobileAction').click();else if(action==='relay-draw-submit'){if(!localShapes.length)return toast('先在画布上画几笔。');act('relay-submit',{stage:game.index,chainId:game.relay.myTask.chainId,shapes:localShapes});}else if(action)act(action);};
 const mobileDockSize=new ResizeObserver(entries=>{const height=entries[0]?.contentRect.height;if(height)document.documentElement.style.setProperty('--mobile-dock-height',Math.ceil($('mobileMatchDock').getBoundingClientRect().height)+'px');});mobileDockSize.observe($('mobileMatchDock'));
@@ -91,12 +96,13 @@ function renderLobby(){
   $('joinRoomForm').querySelector('button').disabled=roomLoading||!roomReady;
   if(roomMode&&room){
     $('roomCode').textContent=room.id;$('roomConnection').textContent=roomStatus;
-    $('roomMembers').innerHTML=room.members.map(p=>`<span class="room-member">${esc(p.name)}${p.id===config.user.id?'（你）':''}<small>${p.id===room.hostId?'房主 · ':''}${p.connected?'在线':'未连接'}</small></span>`).join('');
+    renderRoomMembers(room);
     $('roomHelp').textContent=game?'':host?'朋友入座后，选择 AI 和题库开始比赛。也可以只邀请真人。':'等待房主选择 AI 和题库开始比赛。开局后会在这里显示完整画桌。';
   }
   document.querySelector('.intro').hidden=roomMode&&(!room||!host);
   document.querySelector('.setup-panel').hidden=roomMode&&(!room||!host);
   $('roomCustomWords').hidden=!roomMode||!room||!host;$('roomTimeLimits').hidden=!roomMode||!room||!host;
+  $('selectedAiPreview').hidden=roomMode&&(!room||!host);
   $('customWordCount').textContent=`（${config.defaults?.customWordCount||0} 词）`;
   $('players').innerHTML=(roomMode?(room?.members||[]).map(p=>`<span class="chip human selected">${esc(p.name)}${p.id===config.user.id?'（你）':''}<small>真人</small></span>`).join(''):`<button class="chip human ${human?'selected':''}" data-human="1" aria-pressed="${human}">✦ 你 <small>人类</small></button>`)+config.players.map(p=>`<button class="chip ${selected.has(p.id)?'selected':''} ${(p.provider!=='codex'&&!p.hasKey&&p.provider!=='compatible')?'unavailable':''}" data-player="${esc(p.id)}" aria-pressed="${selected.has(p.id)}" title="${esc(playerLabel(p))}" style="--p-color:${esc(p.color)}"><span class="chip-dot"></span>${esc(p.name)}<small class="chip-model">${esc(playerModelLabel(p))}</small><small>${p.provider==='codex'?'命令行':p.hasKey?'API':'待配置'}</small></button>`).join('');
   const levels=config.categoryLevels?.[category]||(category==='成语'?config.idiomLevels:[]),level=levels.find(item=>item.id===idiomLevel)||levels[0];
@@ -143,15 +149,23 @@ async function switchMode(next){
 }
 function receiveRoom(next){
   if(!config||!isRoom())return;
+  if(!next&&$('roomDialog').open)$('roomDialog').close();
   const changed=game?.id!==next?.game?.id;
   game=next?.game||null;
   if(next&&next.id!==lastRoomId){lastRoomId=next.id;$('useCustomWords').checked=!!config.defaults?.useCustomWords;}
-  if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();}
+  if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();if(changed)selected=new Set(game.players.filter(p=>!p.human).map(p=>p.id));}
   if(changed)resetView();
   if(!roomEntering){const url=new URL('/',location.origin);url.searchParams.set('mode','online');if(next)url.searchParams.set('room',next.id);history.replaceState(null,'',url);}
   const lobbyKey=JSON.stringify([next?.id,next?.hostId,next?.members,game?.id,game?.phase==='finished',roomLoading,roomReady]);
   if(lobbyKey!==roomLobbyKey){roomLobbyKey=lobbyKey;renderLobby();}
   render();
+}
+function renderRoomMembers(room){
+  const online=room.members.filter(p=>p.connected).length,markup=room.members.map(p=>`<article class="room-member${p.id===config.user.id?' is-self':''}" role="listitem"><span class="room-member-avatar" aria-hidden="true">${esc(Array.from(p.name||'?')[0])}</span><div class="room-member-copy"><strong>${esc(p.name)}${p.id===config.user.id?'（你）':''}</strong><div><span class="member-presence ${p.connected?'is-online':''}">${p.connected?'在线':'未连接'}</span>${p.id===room.hostId?'<span class="member-host">房主</span>':''}</div></div></article>`).join('');
+  $('roomMembers').innerHTML=markup;$('roomDialogMembers').innerHTML=markup;
+  $('roomMemberCount').textContent=`${room.members.length} / 8 人 · ${online} 人在线`;
+  $('roomDialogCount').textContent=`${room.members.length} / 8 人`;$('roomDialogCode').textContent='房间码：'+room.id;
+  const url=new URL('/',location.origin);url.searchParams.set('mode','online');url.searchParams.set('room',room.id);$('roomInviteUrl').value=url.href;
 }
 async function enterRoomMode(){
   roomLoading=true;roomEntering=true;renderLobby();
@@ -178,12 +192,13 @@ $('startButton').onclick=async()=>{
 };
 function resetView(){canvasKey='';actionKey='';resultKey='';autoSent='';localShapes=[];drawingHistory.reset();currentStroke=null;animation++;animating=false;window.scrollTo({top:0,behavior:'instant'});}
 async function act(action,extra={}){
-  const id=game?.id;if(!id)return;
+  const id=game?.id;if(!id)return false;
+  if(inFlight&&['guess','pass'].includes(action))return false;
   const stamp={gameId:id,index:game.index,turn:game.turn};
-  if(isRoom()&&!roomClient.connected)return toast('房间正在重连，请恢复连接后重试。');
+  if(isRoom()&&!roomClient.connected){toast('房间正在重连，请恢复连接后重试。');return false;}
   inFlight++;
-  try{await productionTrace?.flush();if(isRoom())await roomClient.action(action,{...stamp,...extra});else await api('/api/action',{gameId:id,action,...extra});await poll();}
-  catch(e){toast(e.message);autoSent='';actionKey='';if(game&&game.phase!=='finished')renderAction();}
+  try{await productionTrace?.flush();if(isRoom())await roomClient.action(action,{...stamp,...extra});else await api('/api/action',{gameId:id,action,...extra});await poll();return true;}
+  catch(e){toast(e.message);autoSent='';actionKey='';if(game&&game.phase!=='finished')renderAction();return false;}
   finally{inFlight--;updateMobileControls();maybeAuto();}
 }
 async function poll(){
@@ -192,8 +207,9 @@ async function poll(){
   try{const data=await api('/api/state');online=true;if(data.game?.mode==='relay'&&game?.id!==data.game.id){mode='relay';human=data.game.players.some(p=>p.human);selected=new Set(data.game.players.filter(p=>!p.human).map(p=>p.id));category=data.game.category;idiomLevel=data.game.wordLevel||data.game.idiomLevel||idiomLevel;renderLobby();}game=data.game;render();}catch(e){if(online)toast(e.message);online=false;}finally{polling=false;}
 }
 function render(){
+  if(isRoom()&&game?.phase==='guessing'&&animating){animation++;animating=false;localShapes=structuredClone(game.shapes);paint(canvas,localShapes);$('playbackControls').hidden=true;}
   const activeRoom=isRoom()&&!!roomClient.room&&!!game&&game.phase!=='finished';
-  $('mobileRoomBadge').hidden=!activeRoom;$('mobileRoomBadge').textContent=activeRoom?(roomClient.connected?roomClient.room.id:'正在重连'):'';$('mobileRoomBadge').title=activeRoom?'房间码 '+roomClient.room.id:'';
+  $('mobileRoomBadge').hidden=!activeRoom;$('mobileRoomBadge').textContent=activeRoom?(roomClient.connected?`成员 ${roomClient.room.members.length} · 邀请`:'正在重连'):'';$('mobileRoomBadge').title=activeRoom?'房间码 '+roomClient.room.id:'';
   $('mobileMatchDock').hidden=!game||game.phase==='finished';$('mobileResourceMenu').hidden=$('assetSetupNotice').hidden;
   $('mobileInvite').hidden=!isRoom();$('mobileLeave').hidden=!isRoom();
   document.body.dataset.mobilePhase=game?.phase||'idle';updateMobileControls();updateCountdown();
@@ -201,12 +217,13 @@ function render(){
   recordingStatus.hidden=!game?.recordingEnabled;syncAudioButton.hidden=!game?.recordingEnabled||game.phase==='finished';recordingStatus.textContent=game?.recordingWarning||'视频素材自动记录中';
   document.body.classList.toggle('relay-showing',!!game?.relay?.showcase&&game.relay.showcase.status!=='complete');
   $('lobby').hidden=!!game;$('game').hidden=!game||game.phase==='finished';$('results').hidden=!game||game.phase!=='finished';
-  const relay=game?.mode==='relay';$('game').classList.toggle('relay-arena',relay);$('relayStageBar').hidden=!relay||game?.phase==='finished';$('autoContinue').closest('label').hidden=relay||isRoom()&&!isHost();document.querySelector('.playback-speed').hidden=relay;
-  companion.update(game,animating);playerSeats.update(game,animating);
+  const relay=game?.mode==='relay';$('game').classList.toggle('relay-arena',relay);$('relayStageBar').hidden=!relay||game?.phase==='finished';$('autoContinue').closest('label').hidden=relay||isRoom();document.querySelector('.playback-speed').hidden=relay;
+  playerSeats.update(game,animating);
   panelDrawer.update(game);
   updateArenaLayout(game);
   mobileRoster.update(game);
   conversation.update(game);
+  renderBanterComposer();
   if(!game||game.phase!=='finished')relayShowcase.stop();
   if(!game)return;if(game.phase==='finished'){renderResults();recordingLinks();return;}if(relay){renderRelay();return;}const g=game;
   $('roundLabel').textContent=`第 ${g.index+1} / ${g.total} 题 · 画手：${g.artistName||'准备中'} · ${g.category}${(g.wordLevelName||g.idiomLevelName)?' / '+(g.wordLevelName||g.idiomLevelName):''} · ${g.length} 个字 · ${hintModeInfo(g.hintMode).name}`;
@@ -222,10 +239,17 @@ function render(){
   $('underCanvas').textContent=g.myHint?`只给你的提示：${g.myHint}${g.hint?' · 公开提示：'+g.hint:''}`:g.hint?`画手公开提示：${g.hint}`:drawable?'画图表达题目，不要写答案。支持鼠标和触屏，Ctrl+Z 撤销。':g.phase==='ready'||g.phase==='guessing'?'所有猜手看到的都是这一张画布。':'';
   renderAction();renderGuessers();maybeAuto();
 }
+function renderBanterComposer(){
+  const markup=banterComposerMarkup(game,myId()),connected=!isRoom()||roomClient.connected,key=markup+'::'+connected;
+  if(key===banterComposerKey)return;banterComposerKey=key;
+  const draft=captureBanterDraft(banterComposer);banterComposer.innerHTML=markup;banterComposer.hidden=!markup;restoreBanterDraft(banterComposer,draft);
+  if(!connected)for(const button of banterComposer.querySelectorAll('button'))button.disabled=true;
+}
+function banterEntry(){return game?.banterEnabled&&game?.players.some(p=>p.id===myId()&&p.human)&&game.players.some(p=>!p.human)?'<button class="quiet" data-action="open-banter">@ AI 发起互怼</button>':'';}
 function updateCountdown(){
   const timer=$('roundTimer'),clock=game?.clock,active=isRoom()&&clock&&game.phase!=='finished';timer.hidden=!active;if(!active)return;
   const offset=clock.serverNow-(game.clockReceivedAt||Date.now());
-  const seconds=Math.max(0,Math.ceil((clock.deadline-Date.now()-offset)/1000)),label=`${clock.stage==='draw'?'作画':'猜词'} ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
+  const seconds=Math.max(0,Math.ceil((clock.deadline-Date.now()-offset)/1000)),label=`${({draw:'作画',guess:'猜词',revise:'自动补画',ready:'开始猜题'})[clock.stage]||'倒计时'} ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
   if(timer.textContent!==label)timer.textContent=label;timer.classList.toggle('urgent',seconds<=10);
 }
 function updateMobileControls(){
@@ -238,10 +262,10 @@ function updateMobileControls(){
   if(g.phase==='drawing'&&canDraw()){action='submit';text='画好了，开始猜';status='轮到你作画';}
   else if(g.phase==='drawing')status=`${g.artistName} 正在作画`;
   else if(g.phase==='drawing-ai')status=`${g.artistName} 正在构思…`;
-  else if(g.phase==='ready'){status='画作准备好了';if(isHost()){action='submit';text=animating?'正在落笔…':'开始猜画';}}
+  else if(g.phase==='ready'){status=isRoom()?'画作正在展示，随后自动开始猜题':'画作准备好了';if(!isRoom()){action='submit';text=animating?'正在落笔…':'开始猜画';}}
   else if(g.phase==='guessing')status=own?.solved?'你已猜中，等待其他选手':own?.status==='confident'?'答案已提交，等待统一揭晓':'等待大家交卷';
   else if(g.phase==='locked')status='大家已交卷，即将统一公布答案';
-  else if(g.phase==='review'){status='本轮答案已公布';if(controlsArtist()){action='revise';text=g.artistHuman?'继续补画':'让 AI 补画';}}
+  else if(g.phase==='review'){status=isRoom()&&!g.artistHuman?'AI 即将自动补画':'本轮判分已完成';if(controlsArtist()&&(!isRoom()||g.artistHuman)){action='revise';text=g.artistHuman?'继续补画':'让 AI 补画';}}
   else if(g.phase==='reveal'){status='答案：'+g.answer;if(isHost()){action='next';text=g.index+1===g.total?'查看结果':'下一题';}}
   else if(g.phase==='draw-error'){status='AI 作画失败';if(isHost()){action='retry-draw';text='重试作画';}}
   if(g.mode==='relay'){status='大家正在完成这一棒';const task=g.relay.myTask;if(task?.status==='waiting'&&task.input){action=task.kind==='draw'?'relay-draw-submit':'open-action';text=task.kind==='draw'?'画好了，交卷':'填写接龙答案';}}
@@ -251,7 +275,7 @@ function updateMobileControls(){
   for(const element of $('mobileGuessForm').elements)element.disabled=inFlight>0||!connected;
   const hint=[g.myHint&&'只给你：'+g.myHint,g.hint&&'公开提示：'+g.hint].filter(Boolean).join('\n');
   $('mobileHint').hidden=!hint;$('mobileHintText').textContent=hint;
-  $('mobileAction').textContent=g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
+  $('mobileAction').textContent=g.phase==='reveal'&&g.banterEnabled?'@ AI / 互动':g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
 }
 function renderRelay(){
   const g=game,task=g.relay.myTask,drawable=canDraw();
@@ -277,7 +301,7 @@ function renderRelayAction(){
 }
 async function animateDrawing(shapes,previous=[]){
   productionTrace?.emit('drawing-playback',{action:'start',revision:game.revision,speed:$('playbackSpeed').value});
-  const token=++animation,plan=drawingTransition(previous,shapes),shown=previous.slice();animating=true;companion.update(game,true);playerSeats.update(game,true);$('playbackControls').hidden=false;
+  const token=++animation,plan=drawingTransition(previous,shapes),shown=previous.slice();animating=true;playerSeats.update(game,true);$('playbackControls').hidden=false;
   const speed=()=>playbackFactor($('playbackSpeed').value);
   paint(canvas,shown);
   for(let i=0;i<plan.remove;i++){
@@ -292,12 +316,12 @@ async function animateDrawing(shapes,previous=[]){
     if(!completed)return;
     shown.push(shape);
   }
-  if(token!==animation)return;paint(canvas,shapes);animating=false;companion.update(game,false);playerSeats.update(game,false);$('playbackControls').hidden=true;productionTrace?.emit('drawing-playback',{action:'end',revision:game.revision});updateMobileControls();maybeAuto();
+  if(token!==animation)return;paint(canvas,shapes);animating=false;playerSeats.update(game,false);$('playbackControls').hidden=true;productionTrace?.emit('drawing-playback',{action:'end',revision:game.revision});updateMobileControls();maybeAuto();
 }
 $('finishDrawingButton').onclick=()=>{productionTrace?.emit('drawing-playback',{action:'skip',revision:game.revision});animation++;animating=false;paint(canvas,localShapes);$('playbackControls').hidden=true;playerSeats.update(game,false);updateMobileControls();maybeAuto();};
 $('playbackSpeed').addEventListener('change',()=>productionTrace?.emit('drawing-playback',{action:'speed',speed:$('playbackSpeed').value}));
 $('pauseSeats').addEventListener('click',()=>productionTrace?.emit('presentation',{action:$('pauseSeats').getAttribute('aria-pressed')==='true'?'pause-characters':'resume-characters'}));
-function maybeAuto(){if(isRoom()&&(!isHost()||!roomClient.connected)||game?.phase!=='ready'||game.artistHuman||!$('autoContinue').checked||animating||inFlight)return;const key=`${game.id}-${game.index}-${game.turn}`;if(autoSent===key)return;autoSent=key;submitCanvas();}
+function maybeAuto(){if(isRoom()||game?.phase!=='ready'||game.artistHuman||!$('autoContinue').checked||animating||inFlight)return;const key=`${game.id}-${game.index}-${game.turn}`;if(autoSent===key)return;autoSent=key;submitCanvas();}
 $('autoContinue').onchange=maybeAuto;
 function readHintChoice(row){const text=row.querySelector('[data-hint-text]');if(text)return text.value.trim()||null;const focus=row.querySelector('[data-hint-focus]').value;return focus?{region:row.querySelector('[data-hint-region]').value,focus}:null;}
 $('actionPanel').addEventListener('change',e=>{const row=e.target.closest('[data-hint-recipient]'),preview=row?.querySelector('[data-hint-preview]');if(!preview)return;try{preview.textContent=visualHint(readHintChoice(row),localShapes,game.hintMode).text||'不发送提示';}catch(error){preview.textContent=error.message;}});
@@ -314,7 +338,7 @@ function renderAction(){
   if(g.phase==='guessing') {
     const humanWaiting=hr&&!hr.solved&&hr.status==='waiting';
     html=`<h3>第 ${g.turn} / 3 轮猜题</h3><p>${humanWaiting?'你有一次机会，想好了再提交。':hr?.solved?'你已猜中，等其他选手完成。':'大家正在独立看图猜答案。'}</p>`;
-    if(humanWaiting)html+='<form id="guessForm" class="guess-form"><input id="guessInput" maxlength="80" placeholder="输入你的答案" aria-label="你的答案" autocomplete="off"><button type="submit">猜</button></form><div class="button-row"><button data-action="pass">跳过这次</button></div>';
+    if(humanWaiting)html+='<form id="guessForm" class="guess-form"><input id="guessInput" maxlength="80" placeholder="输入你的答案" aria-label="你的答案" autocomplete="off"><button type="submit" class="primary guess-submit">提交答案</button><button type="button" class="quiet guess-pass" data-action="pass">跳过</button></form>';
     else if(hr?.status==='confident')html+='<p class="confident-note">✦ 答案已锁定，等大家交卷后统一揭晓。</p>';
     else if(hr?.status==='submitted')html+='<p>本次已跳过，等待其他人。</p>';
     else if(hr?.status==='wrong')html+='<p>这次没猜中，等大家完成后可以看画手改画。</p>';
@@ -323,13 +347,14 @@ function renderAction(){
   if(g.phase==='locked')html='<h3>答案已锁定 · 等待揭晓</h3><p>大家都交卷了，似乎都觉得自己稳了…</p><p class="confident-note">✦ 马上公布本轮结果</p>';
   if(g.phase==='review')html=`<h3>还有人没猜中</h3><p>第 ${g.turn} 轮结束。${currentHintMode==='none'?'本局禁止提示，画手只能补画，再让大家猜一次。':currentHintMode==='preset'?'画手可补画，并选择画面区域和观察重点给出固定提示。':g.artistHuman?'可以补画、指出画里的具体内容，或纠正选手的误读。':'让画手参考大家的误读补画，并给出读图提醒。'}</p><button class="primary" data-action="revise">${g.artistHuman?'继续画，再试一次':'让 AI 改画，再猜一次'}</button><div class="button-row"><button data-action="reveal-confirm">公布答案</button></div>`;
   if(g.phase==='draw-error')html=`<h3>${g.drawErrorKind==='format'?'画手返回的笔画格式有误':'画手暂时未能完成作画'}</h3><p class="error-message">${esc(g.notice)}</p>${g.shapes?.length?'<p>上一版画面已保留，重试不会扣除猜题机会。</p>':''}<button class="primary" data-action="retry-draw">${g.turn>1?'重试改画':'重试画图'}</button><div class="button-row"><button data-action="reveal-confirm">跳过本题</button>${g.drawErrorKind==='format'?'':'<button data-action="settings">检查 AI 设置</button>'}</div>`;
-  if(g.phase==='reveal') {const solved=Object.values(g.results).filter(r=>r.solved&&!r.forfeit).length;html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${solved} / ${Object.keys(g.results).length} 位猜中<br>画手本题得 <b>${g.roundGain}</b> 分</p>${banterMarkup(g.banter)}<button class="primary" data-action="next">${banterPending(g.banter)?'跳过剩余互怼，':''}${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`;}
+  if(g.phase==='reveal') {const solved=Object.values(g.results).filter(r=>r.solved&&!r.forfeit).length;html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${solved} / ${Object.keys(g.results).length} 位猜中<br>画手本题得 <b>${g.roundGain}</b> 分</p>${banterMarkup(g.banter)}${banterEntry()}<button class="primary" data-action="next">${banterPending(g.banter)?'跳过剩余互怼，':''}${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`;}
   if(g.notice&&g.phase!=='draw-error'&&g.phase!=='guessing')html+=`<p class="error-message">${esc(g.notice)}</p>`;
   if(g.phase==='reveal'&&g.recap)html+=`<p class="recap-intro">这题无人猜中，${g.recap.status==='loading'?'大家正在整理复盘…':'复盘已存入对局聊天。'}</p>${recapMarkup(g.recap)}`;
   if(isRoom()){
     if(g.phase==='drawing'&&!myArtist())html=`<h3>${esc(g.artistName)} 正在作画</h3><p>笔画会实时显示在共享画布上。题目只对当前画手可见，画好后大家独立猜词。</p>`;
-    if(g.phase==='ready'&&!isHost())html='<h3>画好了，等待开始猜画</h3><p>房主公布画作后，每个人都可以独立提交答案。</p>';
+    if(g.phase==='ready')html='<h3>画作正在展示</h3><p>展示结束后自动开始猜题，无需房主操作。</p>';
     if(g.phase==='review'&&!controlsArtist())html=`<h3>等待画手补画</h3><p>${esc(g.artistName)} 可以参考误读继续补画，再开始下一轮猜词。</p>`;
+    if(g.phase==='review'&&!g.artistHuman)html='<h3>AI 即将自动补画</h3><p>AI 会参考本轮误读补画，然后自动开始下一轮猜题。</p>';
     if(g.phase==='reveal')html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${Object.values(g.results).filter(r=>r.solved&&!r.forfeit).length} / ${Object.keys(g.results).length} 位猜中 · 画手本题 +${g.roundGain} 分</p>${roomBanterMarkup(g.banter)}${isHost()?`<button class="primary" data-action="next">${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`:'<p>等待房主进入下一题。</p>'}${recapMarkup(g.recap)}`;
   }
   const scope=JSON.stringify([g.id,g.index,g.turn,g.phase]),keepDraft=scope===actionDraftScope;
@@ -355,7 +380,7 @@ function roomBanterMarkup(b){
   if(!canReply)node.querySelector('[data-banter-form]')?.remove();
   if(!isHost())for(const button of node.querySelectorAll('[data-banter-action]'))button.remove();
   if(b.status==='waiting-human'&&!canReply)node.querySelector('.banter-status').textContent=`等待 ${current?.toName||'玩家'} 回应 ${current?.fromName||'对方'}。`;
-  return node.innerHTML;
+  return node.innerHTML+banterEntry();
 }
 $('actionPanel').onclick=async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
   if(game?.mode==='relay'){
@@ -365,6 +390,7 @@ $('actionPanel').onclick=async e=>{const b=e.target.closest('[data-action]');if(
     else {b.disabled=true;await act(a,extra);}
     if(b.isConnected)b.disabled=false;return;
   }
+  if(a==='open-banter'){$('mobileChat').click();banterComposer.querySelector('[data-banter-input]')?.focus({preventScroll:true});return;}
   if(a==='submit'){submitCanvas();return;}
   if(a==='settings'){openSettings();return;}
   if(a==='reveal-confirm'){if(await confirmAction('结束这一题？','会公布答案，未猜中的选手不再获得本题分数。','公布答案'))act('reveal');return;}
@@ -375,7 +401,7 @@ function renderGuessers(){
   const g=game,entries=Object.values(g.results),solved=entries.filter(r=>r.solved&&!r.forfeit).length;
   $('guessProgress').textContent=entries.some(r=>r.forfeit)?'画手空白超时 · 其余选手各 3 分':`${solved} / ${entries.length} 已猜中`;
   playerSeats.update(g,animating);
-  $('privacyNote').textContent=g.phase==='reveal'?'本题结束，所有答案已公开。':(!isRoom()&&g.artistHuman||isRoom()&&myArtist())?'画手可以参考错误答案来改画。':!g.players.some(p=>p.human)?'观战中：已判分的猜词与理由会显示在气泡和聊天中。':'所有人交卷后公布本轮答案 · 百分比为 AI 自报把握';
+  $('privacyNote').textContent=g.phase==='reveal'?'本题结束，所有答案已公开。':(!isRoom()&&g.artistHuman||isRoom()&&myArtist())?'画手可以参考错误答案来改画。':!g.players.some(p=>p.human)?'观战中：已判分的猜词与理由会显示在气泡和聊天中。':g.results[myId()]?.solved?'你已猜中，可查看已判分的全部回答。':isRoom()&&g.players.filter(p=>p.human).length>1?'本轮判分后公开错误答案；猜中后可查看全部回答。':'本轮判分后展示各位选手的回答。';
 }
 const COLORS=['#202633','#db2450','#f09524','#f3ca24','#30a357','#2983c7','#415ed1','#8150ca','#895b33','#e979ab','#ffffff'];
 $('colors').innerHTML=COLORS.map((c,i)=>`<button class="swatch ${i===0?'selected':''}" style="background:${c}" data-color="${c}" aria-label="${['黑色','红色','橙色','黄色','绿色','蓝色','靛蓝','紫色','棕色','粉色','白色'][i]}" aria-pressed="${i===0}"></button>`).join('');

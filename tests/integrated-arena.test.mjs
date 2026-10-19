@@ -157,3 +157,17 @@ test('player guess deadline gives missing humans zero while AI keeps its own req
     const snapshot=g.snapshot('c');assert.equal(snapshot.results.b.history[0].guess,'乙的答案');assert.equal(g.clock,null);
   }finally{rooms.close();}
 });
+
+test('房间 AI 画好后自动开始猜题，未全猜中自动补画，不依赖房主浏览器',async()=>{
+ let draws=0;const users=['a','b'].map(id=>({id,name:id}));
+ const rooms=new Rooms({accounts:{charge(){},own(){}},recordings:{attach(){}},makeOptions:()=>({players:[{id:'ai',name:'AI',provider:'compatible'}],category:'动物',rounds:1,orderRandom:n=>n===3?0:n-1,run:async()=>{draws++;return {shapes:[outline]};}})});
+ try{
+  rooms.create(users[0]);const room=rooms.require(users[0]);rooms.join(users[1],room.id);await rooms.start(users[0],{});await new Promise(r=>setImmediate(r));const g=room.game;g.revealDelay=0;
+  assert.equal(g.artist.id,'ai');assert.equal(g.phase,'ready');assert.equal(g.clock.stage,'ready');
+  clearTimeout(room.clockTimer);g.clock.deadline=Date.now()-1;rooms.expire(room);await new Promise(r=>setImmediate(r));assert.equal(g.phase,'guessing');
+  g.humanGuess('第一个错词',false,'a');g.humanGuess('第二个错词',false,'b');assert.equal(g.phase,'review');assert.equal(g.clock.stage,'revise');assert.equal(g.clock.duration,3);
+  clearTimeout(room.clockTimer);g.clock.deadline=Date.now()-1;rooms.expire(room);await new Promise(r=>setImmediate(r));
+  assert.equal(g.turn,2);assert.equal(g.phase,'ready');assert.equal(draws,2);
+  clearTimeout(room.clockTimer);g.clock.deadline=Date.now()-1;rooms.expire(room);await new Promise(r=>setImmediate(r));assert.equal(g.phase,'guessing');assert.equal(g.turn,2);
+ }finally{rooms.close();}
+});

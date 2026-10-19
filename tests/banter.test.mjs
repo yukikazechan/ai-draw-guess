@@ -4,7 +4,7 @@ import {Banter,battleBanterPairs,relayBanterPairs,banterPrompt} from '../lib/ban
 import {Game} from '../lib/game.mjs';
 import {RelayShowcase} from '../lib/relay-showcase.mjs';
 import {MatchRecording} from '../lib/recording.mjs';
-import {banterMarkup} from '../public/banter-view.mjs';
+import {banterMarkup,banterComposerMarkup} from '../public/banter-view.mjs';
 import {messageLabel,latestSpeech} from '../public/conversation.mjs';
 const players=[{id:'g',name:'Gemini',characterId:'gemini',apiKey:'SECRET'},{id:'c',name:'Claude',characterId:'claude'},{id:'human',name:'你',human:true}];
 const pairs=[{fromId:'c',toId:'g',kind:'artist-miss'}];
@@ -15,14 +15,14 @@ const shapes=[{type:'ellipse',x:500,y:300,rx:100,ry:80,color:'#202633',width:5}]
 const words=Array.from({length:5},()=>({answer:'雨伞',category:'物品'}));
 const bytes=Buffer.alloc(24);Buffer.from('89504e470d0a1a0a','hex').copy(bytes);bytes.writeUInt32BE(1000,16);bytes.writeUInt32BE(650,20);const image='data:image/png;base64,'+bytes.toString('base64');
 
-test('四类互动随机可达；最多两组、不重复对喷、不让人类自动开口、不责怪未作答者',()=>{
+test('五类互动随机可达；最多两组、不重复对喷、不让人类自动开口、不责怪未作答者',()=>{
  const ps=[...players,{id:'m',name:'MiMo'},{id:'offline',name:'掉线者'}],results={g:right,human:wrong,m:wrong,offline:{solved:false,history:[{guess:'',skipped:true}]}},random=rng(),seen=new Set();let empty=false;
  for(let i=0;i<500;i++){
   const pairs=battleBanterPairs(ps,'c',results,random);if(!pairs.length)empty=true;assert(pairs.length<=2);
   assert.equal(new Set(pairs.map(p=>[p.fromId,p.toId].sort().join(':'))).size,pairs.length);
   for(const p of pairs){seen.add(p.kind);assert.notEqual(p.fromId,'human');assert.notEqual(p.fromId,p.toId);assert(![p.fromId,p.toId].includes('offline'));}
  }
- assert.equal(seen.size,4);assert(empty);assert.deepEqual(battleBanterPairs(ps,'c',{g:right,m:right},()=>0),[]);
+ assert.equal(seen.size,5);assert(empty);assert.deepEqual(battleBanterPairs(ps,'c',{g:right,m:right},()=>0),[]);
 });
 test('双方由各自模型调用；回应能看到原话，喵只在对白中，消息带明确指向',async()=>{
  const calls=[],messages=[],b=make({run:async(p,prompt)=>{calls.push({id:p.id,prompt});return {line:p.id==='c'?'Gemini，弯钩是装饰吗？':'Claude，我确实漏看伞柄了。'};},publish:m=>messages.push(m)});
@@ -82,4 +82,31 @@ test('跳过、关闭功能不额外调用；公开快照不携带凭证或模�
  let calls=0;const g=new Game({players:players.slice(0,2),human:true,words,orderRandom:n=>n-1,banter:false,run:async()=>{calls++;return {guess:'雨伞'};},revealDelay:0});
  try{await g.next();await g.beginGuess({image,shapes});assert.equal(g.banter,null);assert.equal(calls,2);}finally{g.finish();}
  assert(banterPrompt({answer:'雨伞'},{fromName:'Claude',toName:'Gemini',kind:'artist-miss'},false).includes('不替对方写回应'));
+});
+
+test('玩家可主动 @ 本局 AI，只有目标模型回应，身份、上下文和次数均受约束',async()=>{
+ const calls=[],messages=[],b=make({pairs:[],context:{answer:'雨伞',players:[{name:'你',guesses:[{guess:'降落伞',correct:false}]}]},run:async(p,prompt)=>{calls.push({id:p.id,prompt});return {line:'你把伞骨当绳子了喵！'};},publish:m=>messages.push(m)});
+ const data={banterId:b.id,targetId:'g',text:'Gemini，这么明显的伞骨你怎么没看到？'};
+ assert.throws(()=>b.challenge({...data,targetId:'human'},'human'),/本局/);assert.throws(()=>b.challenge(data,'outsider'),/身份/);
+ assert.throws(()=>b.challenge({...data,text:''},'human'),/请输入/);
+ for(let i=0;i<3;i++)await b.challenge(data,'human');
+ assert.equal(calls.length,3);assert(calls.every(c=>c.id==='g'&&c.prompt.includes(data.text)&&c.prompt.includes('降落伞')));
+ assert.equal(messages.length,6);assert.equal(messages[0].source,'human');assert.equal(messages[0].targetId,'g');assert.equal(messages[1].targetId,'human');assert.equal(messages[1].source,'model');
+ assert.throws(()=>b.challenge(data,'human'),/3 次/);assert.equal(b.status,'complete');assert(!JSON.stringify(b.snapshot()).includes('SECRET'));
+ const markup=banterComposerMarkup({phase:'reveal',players,banterEnabled:true,banter:b.snapshot()});assert(markup.includes('data-banter-challenge'));assert(markup.includes('@Gemini'));assert(markup.includes('下一题'));
+ assert.equal(banterComposerMarkup({phase:'guessing',players,banterEnabled:true,banter:b.snapshot()}),'');
+});
+
+test('AI 可概率性根据玩家正确回答主动点名，自动互怼不强行造错、不针对超时弃权',()=>{
+ const ps=[{id:'artist',name:'画手',human:true},{id:'ai',name:'AI'},{id:'human',name:'玩家',human:true}],results={ai:right,human:right};
+ assert(battleBanterPairs(ps,'artist',results,()=>0).some(p=>p.kind==='human-answer'&&p.fromId==='ai'&&p.toId==='human'));
+ assert.deepEqual(battleBanterPairs(ps,'artist',results,()=>1),[]);
+ assert.deepEqual(battleBanterPairs(ps,'artist',{ai:{...right,forfeit:true},human:{...right,forfeit:true}},()=>0),[]);
+});
+
+test('主动互怼的迟到 AI 回应不能污染下一题或跳过后的聊天',async()=>{
+ let resolve;const messages=[],b=make({pairs:[],run:()=>new Promise(r=>resolve=r),publish:m=>messages.push(m)});
+ const pending=b.challenge({banterId:b.id,targetId:'g',text:'来解释一下你的猜词。'},'human');
+ b.stop();resolve({line:'迟到的回复'});await pending;
+ assert.equal(messages.length,1);assert.equal(messages[0].source,'human');assert.equal(b.status,'skipped');
 });
