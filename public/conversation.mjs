@@ -3,7 +3,7 @@ export const escapeText=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 const esc=escapeText;
 export const matchNote=match=>({'idiom-order':'四个字齐全，顺序不同也算对','idiom-three':'三个字位置正确，也算对'})[match]||'';
 export function messageLabel(message){
-  if(message.kind==='chat')return `${message.spectator?'观战发言':'聊天'}${message.targetName?' → '+message.targetName:''}`;
+  if(message.kind==='chat')return `${message.source==='model'?'AI 回应':message.spectator?'观战发言':'聊天'}${message.targetName?' → '+message.targetName:''}`;
   if(message.kind==='forfeit')return '超时判分';
   if(message.kind==='guess'&&message.timedOut)return '作答超时';
   if(message.kind==='banter')return `${message.reply?'回嘴':'互怼'} → ${message.targetName||'对方'}`;
@@ -71,7 +71,7 @@ export function createConversation(panel){
   function update(game){
     panel.hidden=!game;if(!game)return;
     if(gameId!==game.id){gameId=game.id;nodes.clear();log.replaceChildren();key='';filterKey='';filter.value='all';follow.checked=true;newButton.hidden=true;}
-    messages=(game.conversation||[]).map(m=>{const p=game.players?.find(p=>p.id===m.playerId);return {...m,model:p&&!p.human?playerModelLabel(p):''};});render();
+    messages=(game.conversation||[]).map(m=>{const p=game.players?.find(p=>p.id===m.playerId);return {...m,model:m.kind==='chat'&&m.source==='model'?m.model||'':p&&!p.human?playerModelLabel(p):''};});render();
   }
   return {update};
 }

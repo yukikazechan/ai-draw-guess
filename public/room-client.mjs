@@ -44,6 +44,8 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
     lobbyQueue=task;return task;
   }
   async function chat(text,targetId=''){const roomId=room?.id;if(!roomId)throw new Error('请先加入房间。');await request('/api/rooms/chat',{text,targetId,roomId});await refresh();}
+  async function lobbyChat(text,targetId){const roomId=room?.id;if(!roomId)throw new Error('请先加入房间。');await request('/api/rooms/chat-ai',{roomId,text,targetId});await refresh();}
+  async function retryLobbyChat(chatId){const roomId=room?.id;if(!roomId)throw new Error('请先加入房间。');await request('/api/rooms/chat-ai/retry',{roomId,chatId});await refresh();}
   async function action(action,extra={}){
     const g=room?.game;if(!g)return;
     cancelDrawing();await mutate('/api/rooms/action',{gameId:g.id,index:g.index,turn:g.turn,action,...extra});await refresh();
@@ -60,5 +62,5 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
     clearTimeout(drawTimer);drawTimer=setTimeout(flushDrawing,Math.max(0,90-(Date.now()-lastDraw)));
   }
   function suspend(){active=false;epoch++;closeSocket();}
-  return {get room(){return room;},get connected(){return connected;},enter,refresh,create,join,leave,start,lobby,chat,action,drawing,suspend};
+  return {get room(){return room;},get connected(){return connected;},enter,refresh,create,join,leave,start,lobby,chat,lobbyChat,retryLobbyChat,action,drawing,suspend};
 }

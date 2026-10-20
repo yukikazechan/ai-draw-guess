@@ -1,5 +1,7 @@
 # Existing visual system
 
+Before a match and on the finished-match page, the same room composer lists AI models from the host's selected lobby roster and sends to the lobby conversation endpoint. It retains the selected recipient during replies, labels AI responses with their actual model, exposes retry for the sender/host, and explains that AI can be addressed before starting. No second form or separate chat screen is added. During a match the composer returns to the existing reveal-only AI interaction rules.
+
 The message recipient stays selected across an AI response so follow-up lines remain addressed to that AI. While it responds, only sending to that selected AI pauses; the recipient control still allows ordinary human chat. Host changes update results-page actions immediately and reset lobby choices to the new host's own model configuration. Spectators do not see export links they cannot access.
 
 Room members share the host's selected AI preview before each match, including character and actual model label. Selection updates arrive through room state; credentials and endpoint URLs are excluded. The ready room keeps chat visible. During room play, one composer handles public chat, human mentions, AI challenges after reveal, and replies when the viewer is addressed. Desktop uses recipient, expanding input and send button on one row; mobile puts the recipient above the input/send row. AI waits leave ordinary human chat available. A versioned room stylesheet refreshes the updated layout on deployments with cached CSS.

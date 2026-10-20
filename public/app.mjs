@@ -51,12 +51,12 @@ roomChatComposer.onsubmit=async e=>{
   const input=$('roomChatInput'),text=input.value.trim(),room=roomClient.room;if(!text||!room)return;
   let errorText='';roomChatBusy=true;
   try{const message=roomMessageAction(room,myId(),$('roomChatTarget').value,text);renderRoomChat();
-    const sent=message.action==='chat'?(await roomClient.chat(text,message.extra.targetId),true):await act(message.action,message.extra);
+    const sent=message.action==='chat'?(await roomClient.chat(text,message.extra.targetId),true):message.action==='lobby-ai'?(await roomClient.lobbyChat(text,message.extra.targetId),true):await act(message.action,message.extra);
     if(sent&&roomClient.room?.id===room.id&&input.value.trim()===text)input.value='';
   }catch(error){errorText=error.message;}finally{roomChatBusy=false;renderRoomChat();if(errorText)$('roomChatStatus').textContent=errorText;}
 };
 $('roomChatTarget').onchange=()=>renderRoomChat();
-$('roomChatRetry').onclick=()=>act('banter-retry',{banterId:roomClient.room?.game?.banter?.id});
+$('roomChatRetry').onclick=async()=>{const state=roomComposerState(roomClient.room,myId());if(!state.preparing)return act('banter-retry',{banterId:state.banterId});roomChatBusy=true;renderRoomChat();try{await roomClient.retryLobbyChat(state.chatId);}catch(error){toast(error.message);}finally{roomChatBusy=false;renderRoomChat();}};
 const mobileRoster=createMobileRoster({container:$('guessers'),section:$('mobileRoster'),home:document.querySelector('.play-sidebar')});
 bindBanterControls($('actionPanel'),act);bindBanterControls($('results'),act);
 document.querySelector('.final-setup').insertAdjacentHTML('beforebegin','<div class="setup-row banter-setting"><span class="row-label">赛后互动</span><div><label class="check"><input type="checkbox" id="banterEnabled" checked> 开启赛后互怼</label><p class="hint-mode-help">答案揭晓后，AI 可能根据真实作答点名；你也可以在聊天里 @ 选手发起互怼。自动最多两组，可随时跳过。</p></div></div>');
@@ -395,7 +395,7 @@ function renderAction(){
     else if(hr?.status==='confident')html+='<p class="confident-note">✦ 答案已锁定，等大家交卷后统一揭晓。</p>';
     else if(hr?.status==='submitted')html+='<p>本次已跳过，等待其他人。</p>';
     else if(hr?.status==='wrong')html+='<p>这次没猜中，等大家完成后可以看画手改画。</p>';
-    if(errors.length)html+='<p class="error-message">有选手连接失败。本次机会尚未扣除。</p><div class="button-row"><button data-action="retry-guesses">重试失败选手</button><button data-action="skip-errors">跳过失败选手</button></div>';
+    if(errors.length)html+=`<p class="error-message">有 AI 连接失败，本次机会尚未扣除。${isRoom()&&!isHost()?'等待房主重试或跳过失败的 AI 后继续。':'可重试失败的 AI，或跳过它本次作答继续比赛。'}</p><div class="button-row"><button data-action="retry-guesses">重试失败选手</button><button data-action="skip-errors">跳过失败选手</button></div>`;
   }
   if(g.phase==='locked')html='<h3>答案已锁定 · 等待揭晓</h3><p>大家都交卷了，似乎都觉得自己稳了…</p><p class="confident-note">✦ 马上公布本轮结果</p>';
   if(g.phase==='review')html=`<h3>还有人没猜中</h3><p>第 ${g.turn} 轮结束。${currentHintMode==='none'?'本局禁止提示，画手只能补画，再让大家猜一次。':currentHintMode==='preset'?'画手可补画，并选择画面区域和观察重点给出固定提示。':g.artistHuman?'可以补画、指出画里的具体内容，或纠正选手的误读。':'让画手参考大家的误读补画，并给出读图提醒。'}</p><button class="primary" data-action="revise">${g.artistHuman?'继续画，再试一次':'让 AI 改画，再猜一次'}</button><div class="button-row"><button data-action="reveal-confirm">公布答案</button></div>`;
