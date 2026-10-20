@@ -1,5 +1,7 @@
 # Existing visual system
 
+The message recipient stays selected across an AI response so follow-up lines remain addressed to that AI. While it responds, only sending to that selected AI pauses; the recipient control still allows ordinary human chat. Host changes update results-page actions immediately and reset lobby choices to the new host's own model configuration. Spectators do not see export links they cannot access.
+
 Room members share the host's selected AI preview before each match, including character and actual model label. Selection updates arrive through room state; credentials and endpoint URLs are excluded. The ready room keeps chat visible. During room play, one composer handles public chat, human mentions, AI challenges after reveal, and replies when the viewer is addressed. Desktop uses recipient, expanding input and send button on one row; mobile puts the recipient above the input/send row. AI waits leave ordinary human chat available. A versioned room stylesheet refreshes the updated layout on deployments with cached CSS.
 
 Invitation failures remain visible next to the join form and preserve the invite code in the URL and input. Late arrivals see the shared arena as spectators, with “本局观战 · 下局自动参赛” in the member list, action panel and mobile status. Room messages use the existing conversation panel and drawer; they remain available between games and mark spectator messages. Chat and post-reveal targeted AI banter share a composer. The member cap remains eight, including spectators waiting for the next match.

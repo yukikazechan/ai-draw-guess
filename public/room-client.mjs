@@ -1,6 +1,7 @@
 // The existing arena owns presentation; this adapter only transports room state.
 export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},onError=()=>{},Socket=globalThis.WebSocket,url=globalThis.location}){
   let room=null,socket=null,active=false,epoch=0,mutating=false,reconnectTimer,drawTimer,pending=null,lastDraw=0,connected=false;
+  let lobbyQueue=Promise.resolve(),lobbyRevision=0;
   function connection(value,text){connected=value;onConnection(value,text);}
   function adopt(next){
     if(next&&room?.id===next.id&&(next.version||0)<(room.version||0))return;
@@ -32,8 +33,17 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
   async function join(code){await mutate('/api/rooms/join',{code});connect();}
   async function leave(){await mutate('/api/rooms/leave',{});epoch++;closeSocket();adopt(null);}
   async function start(options){cancelDrawing();await mutate('/api/rooms/start',options);}
-  async function lobby(options){return mutate('/api/rooms/lobby',options);}
-  async function chat(text,targetId=''){await request('/api/rooms/chat',{text,targetId});await refresh();}
+  function lobby(options){
+    const revision=++lobbyRevision,token=epoch,roomId=room?.id;
+    // Serialize background selection updates without blocking start/leave actions.
+    const task=lobbyQueue.catch(()=>{}).then(async()=>{
+      if(!active||token!==epoch||revision!==lobbyRevision||!roomId||room?.id!==roomId)return;
+      const result=await request('/api/rooms/lobby',{...options,roomId});
+      if(active&&token===epoch&&room?.id===roomId&&'room' in result)adopt(result.room);
+    });
+    lobbyQueue=task;return task;
+  }
+  async function chat(text,targetId=''){const roomId=room?.id;if(!roomId)throw new Error('请先加入房间。');await request('/api/rooms/chat',{text,targetId,roomId});await refresh();}
   async function action(action,extra={}){
     const g=room?.game;if(!g)return;
     cancelDrawing();await mutate('/api/rooms/action',{gameId:g.id,index:g.index,turn:g.turn,action,...extra});await refresh();

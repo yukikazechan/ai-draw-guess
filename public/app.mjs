@@ -22,7 +22,7 @@ let canvasKey='',actionKey='',resultKey='',animation=0,animating=false,inFlight=
 let modelCatalog=null,actionDraftScope='',hintMode='visual';
 let productionTrace=null,bucket=false,mobileDraftScope='',banterComposerKey='';
 let roomReady=false,roomEntering=false,roomLoading=false,lastRoomId='',roomLobbyKey='',roomStatus='正在连接房间…',roomEntryError='',roomChatBusy=false,roomChatScope='',roomChatReply='',roomChatOptions='';
-let roomSelectionKey='',roomSelectionTimer;
+let roomSelectionKey='',roomSelectionTimer,lastRoomHostId='';
 const roomClient=createRoomClient({request:api,onChange:receiveRoom,onError:toast,onConnection:(connected,text)=>{roomStatus=text;$('roomConnection').textContent=text;document.body.classList.toggle('room-disconnected',mode==='online'&&!!roomClient.room&&!connected);if(config&&mode==='online'){actionKey='';render();}}});
 const isRoom=()=>mode==='online';
 const isHost=()=>!isRoom()||roomClient.room?.hostId===config?.user?.id;
@@ -103,6 +103,7 @@ async function loadConfig(init=false,adminSettings=false){
 }
 function renderLobby(){
   const room=roomClient.room,roomMode=isRoom(),host=isHost();
+  if(roomMode&&room&&host&&(!game||game.phase==='finished'))selected=new Set([...selected].filter(id=>config.players.some(p=>p.id===id&&p.enabled)));
   document.body.classList.toggle('room-mode',roomMode);
   document.body.classList.toggle('room-disconnected',roomMode&&!!room&&!roomClient.connected);
   $('roomEntry').hidden=!roomMode||!!room;
@@ -115,7 +116,7 @@ function renderLobby(){
   if(roomMode&&room){
     $('roomCode').textContent=room.id;$('roomConnection').textContent=roomStatus;
     renderRoomMembers(room);
-    $('roomHelp').textContent=isSpectator()?'本局观战 · 可在房间聊天；留在房间，下一局自动参赛。':game?.phase==='finished'?'比赛已结束，留在房间等房主再开一局，所有成员一起参赛。':game?'比赛进行中，新加入的朋友可先观战，下局参赛。':host?'朋友入座后，选择 AI 和题库开始比赛。也可以只邀请真人。':'等待房主选择 AI 和题库开始比赛。开局后会在这里显示完整画桌。';
+    $('roomHelp').textContent=game?.phase==='finished'?(host?'比赛已结束，你是房主，可以准备下一局。':'比赛已结束，留在房间等房主再开一局，所有成员一起参赛。'):isSpectator()?'本局观战 · 可在房间聊天；留在房间，下一局自动参赛。':game?'比赛进行中，新加入的朋友可先观战，下局参赛。':host?'朋友入座后，选择 AI 和题库开始比赛。也可以只邀请真人。':'等待房主选择 AI 和题库开始比赛。开局后会在这里显示完整画桌。';
   }
   document.querySelector('.intro').hidden=roomMode&&(!room||!host);
   document.querySelector('.setup-panel').hidden=roomMode&&(!room||!host);
@@ -157,7 +158,7 @@ function publishRoomSelection(){
   const room=roomClient.room;if(!isRoom()||!room||!isHost()||game&&game.phase!=='finished')return;
   const playerIds=config.players.filter(p=>selected.has(p.id)).map(p=>p.id),key=JSON.stringify([room.id,playerIds,config.players]);
   if(key===roomSelectionKey)return;roomSelectionKey=key;clearTimeout(roomSelectionTimer);
-  roomSelectionTimer=setTimeout(async()=>{if(!isRoom()||roomClient.room?.id!==room.id||!isHost()||game&&game.phase!=='finished')return;try{await roomClient.lobby({playerIds});}catch(error){roomSelectionKey='';toast(error.message);}},150);
+  roomSelectionTimer=setTimeout(async()=>{if(!isRoom()||roomClient.room?.id!==room.id||!isHost()||game&&game.phase!=='finished')return;try{await roomClient.lobby({playerIds});}catch(error){if(roomClient.room?.id===room.id&&isHost()&&(!game||game.phase==='finished')&&roomSelectionKey===key){roomSelectionKey='';toast(error.message);}}},150);
 }
 $('players').onclick=e=>{const h=e.target.closest('[data-human]'),p=e.target.closest('[data-player]');if(h){if(mode==='duel')return toast('单人模式需要你参加。');human=!human;}if(p){const id=p.dataset.player;if(mode==='duel')selected=new Set([id]);else selected.has(id)?selected.delete(id):selected.add(id);}renderLobby();};
 $('categories').onclick=e=>{const b=e.target.closest('[data-category]');if(b){category=b.dataset.category;renderLobby();}};
@@ -178,9 +179,13 @@ function receiveRoom(next){
   if(!config||!isRoom())return;
   if(!next&&$('roomDialog').open)$('roomDialog').close();
   const changed=game?.id!==next?.game?.id;
+  const ownerChanged=lastRoomHostId!==(next?.hostId||'');
+  if(ownerChanged){lastRoomHostId=next?.hostId||'';roomSelectionKey='';clearTimeout(roomSelectionTimer);}
   game=next?.game||null;
   if(next&&next.id!==lastRoomId){lastRoomId=next.id;$('useCustomWords').checked=!!config.defaults?.useCustomWords;if(next.hostId===config.user.id&&next.lobby)selected=new Set(next.lobby.playerIds);}
-  if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();if(changed)selected=new Set(game.players.filter(p=>!p.human).map(p=>p.id));}
+  if(!next)lastRoomId='';
+  if(ownerChanged&&next?.hostId===config.user.id&&next.lobby)selected=new Set(next.lobby.playerIds);
+  if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();if(changed&&!(ownerChanged&&next.hostId===config.user.id&&game.phase==='finished'))selected=new Set(game.players.filter(p=>!p.human).map(p=>p.id));}
   if(changed)resetView();
   if(!roomEntering){const url=new URL('/',location.origin);url.searchParams.set('mode','online');const code=next?.id||new URL(location.href).searchParams.get('room');if(code)url.searchParams.set('room',code);history.replaceState(null,'',url);}
   const lobbyKey=JSON.stringify([next?.id,next?.hostId,next?.members,next?.lobby,game?.id,game?.phase==='finished',roomLoading,roomReady]);
@@ -281,13 +286,14 @@ function renderRoomChat(){
   roomChatComposer.hidden=!isRoom()||!roomClient.room;
   const state=roomComposerState(roomClient.room,myId()),select=$('roomChatTarget'),selected=select.value;
   const options=state.targets.map(p=>`<option value="${esc(p.id)}"${p.disabled?' disabled':''}>${p.id?'@':''}${esc(p.name)}${p.kind==='ai'?' · AI':''}</option>`).join('');
-  if(options!==roomChatOptions){roomChatOptions=options;select.innerHTML=options;select.value=state.targets.some(p=>p.id===selected&&!p.disabled)?selected:'';}
+  if(options!==roomChatOptions){roomChatOptions=options;select.innerHTML=options;select.value=state.targets.some(p=>p.id===selected)?selected:'';}
   const replyKey=state.reply?.id||'';if(replyKey!==roomChatReply){roomChatReply=replyKey;if(state.reply)select.value=state.reply.fromId;}
   const target=state.targets.find(p=>p.id===select.value),reply=state.reply?.fromId===select.value;
   $('roomChatInput').maxLength=target?.kind==='ai'||reply?120:200;
   $('roomChatInput').placeholder=reply?`回复 @${state.reply.fromName}`:target?.id?`对 @${target.name} 说点什么…`:'说点什么，也可以 @ 真人或 AI';
   $('roomChatStatus').textContent=state.hint;$('roomChatRetry').hidden=!state.retry;
   for(const control of roomChatComposer.elements)control.disabled=roomChatBusy||!roomClient.connected;
+  roomChatComposer.querySelector('[type="submit"]').disabled=roomChatBusy||!roomClient.connected||!!target?.disabled;
   // Reapply unavailable AI options after the form's connection state changes.
   for(const option of select.options)option.disabled=!!state.targets.find(p=>p.id===option.value)?.disabled;
 }
@@ -475,14 +481,14 @@ function renderResults(){
   if(game.mode==='relay'&&relayShowcase.update(game))return;
   if(game.mode==='relay'){const key=`relay-${game.id}-${game.updated}`;if(resultKey!==key){resultKey=key;renderRelayResults($('results'),game,act);window.scrollTo({top:0,behavior:'instant'});}return;}
   $('results').onclick=null;
-  const g=game,key=g.id+'-'+g.history.length+'-'+g.updated;if(resultKey===key)return;resultKey=key;
+  const g=game,key=JSON.stringify([g.id,g.history.length,g.updated,isHost(),g.viewerRole,isRoom()&&roomClient.connected]);if(resultKey===key)return;resultKey=key;
   const ranking=[...g.players].sort((a,b)=>b.total-a.total);
   const best=(field,denom)=>{const eligible=g.players.filter(p=>p[denom]>0);if(!eligible.length)return {name:'暂无',rate:'—'};const value=Math.max(...eligible.map(p=>p[field]/p[denom]));return {name:eligible.filter(p=>p[field]/p[denom]===value).map(p=>p.name).join('、'),rate:`${Math.round(value*100)}%`};};
   const draw=best('drawScore','drawPossible'),guess=best('guessScore','guessPossible'),max=ranking[0].total,winners=ranking.filter(p=>p.total===max).map(p=>p.name).join('、');
   $('results').innerHTML=`<div class="results-head"><div><p class="eyebrow">比赛结束 · ${g.history.length} 幅脑洞作品</p><h1>这一局，谁赢了？</h1></div><div class="result-actions"><a id="exportButton" class="quiet download-link" href="/api/export" download="draw-guess-replay.json">导出复盘</a><button id="homeButton" class="primary">再来一局</button></div></div><div class="awards"><article class="award"><small>总冠军 ✦</small><strong>${esc(winners)}</strong><p>${max} 分 · 总分最高</p></article><article class="award"><small>最佳画手 ✎</small><strong>${esc(draw.name)}</strong><p>${draw.rate} · 作画得分 / 可得满分</p></article><article class="award"><small>最佳猜手 ◇</small><strong>${esc(guess.name)}</strong><p>${guess.rate} · 猜题得分 / 可得满分</p></article></div><div class="table-wrap"><table><thead><tr><th>名次</th><th>选手</th><th>总分</th><th>画图分</th><th>猜题分</th><th>猜中题数</th><th>画了几幅</th></tr></thead><tbody>${ranking.map((p,i)=>`<tr><td>${i+1}</td><td>${esc(playerLabel(p))}</td><td><b>${p.total}</b></td><td>${p.drawScore} <small> / ${p.drawPossible}</small></td><td>${p.guessScore} <small> / ${p.guessPossible}</small></td><td>${p.hits} / ${p.guessPossible/3}</td><td>${p.drawn}</td></tr>`).join('')}</tbody></table></div><h2 class="gallery-heading">每一幅画</h2><div class="gallery">${g.history.map((r,i)=>`<article class="gallery-card"><canvas width="1000" height="650" id="gallery-${i}" aria-label="${esc(r.answer)}的画作"></canvas><div class="gallery-info"><h3>${esc(r.answer)}</h3><p>${esc(r.artistName)} · 画手 +${r.drawGain} 分</p>${g.players.filter(p=>r.results[p.id]).map(p=>{const v=r.results[p.id];return `<div class="gallery-guess"><span>${esc(playerLabel(p))}${p.id===r.artistId?'（盲猜）':''}</span><b>${v.forfeit?`画手空白超时 · +${v.points}`:v.solved?`第 ${v.history.find(h=>h.correct)?.turn} 次猜中 · +${v.points}`:'未猜中'}</b></div>`;}).join('')}<details><summary>查看猜题记录</summary>${g.players.filter(p=>r.results[p.id]).map(p=>`<p><b>${esc(p.name)}</b>：${r.results[p.id].history.map(h=>`${h.guess?esc(h.guess):'跳过'}${h.correct?' ✓':' ×'}`).join('；')||'未作答'}</p>`).join('')}</details>${recapMarkup(r.recap)}</div></article>`).join('')}</div>`;
   g.history.forEach((r,i)=>paint($(`gallery-${i}`),r.shapes));
   $('results').querySelectorAll('.gallery-info').forEach((el,i)=>el.insertAdjacentHTML('beforeend',banterMarkup(g.history[i].banter,{controls:false})));
-  if(isRoom()){$('exportButton').href='/api/export?id='+encodeURIComponent(g.id);$('homeButton').textContent=isHost()?'准备下一局':'等待房主再开一局';$('homeButton').disabled=!isHost();}
+  if(isRoom()){$('exportButton').href='/api/export?id='+encodeURIComponent(g.id);$('exportButton').hidden=isSpectator();$('homeButton').textContent=isHost()?'准备下一局':'等待房主再开一局';$('homeButton').disabled=!isHost()||!roomClient.connected;}
   $('homeButton').onclick=()=>act('home');
 }
 function settingsRow(p){
