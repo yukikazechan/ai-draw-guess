@@ -38,7 +38,7 @@ test('一位真人加 AI 的房间，观众仍不能提前看到正确回答或�
   const game=new RoomGame({players:[{id:'ai',name:'AI'},{id:'other-ai',name:'另一位 AI'}],humans:[{...host,human:true}],human:false,mode:'battle',category:'动物',orderRandom:n=>n-1,revealDelay:0});
   try{
     await game.next();game.phase='guessing';game.record('ai',game.word.answer,'秘密正确理由',80,false);game.record('other-ai','错误答案','错误理由',20,false);game.settle();
-    // The sole participant keeps the original early-disclosure behavior.
+    // The artist knows the answer and can inspect published guesses.
     assert.equal(game.snapshot(host.id).results.ai.history.length,1);
     game.privateHints={ai:'专属秘密提示'};
     const state=game.snapshot(viewer.id);assert.equal(state.answer,null);assert.deepEqual(state.results.ai.history,[]);

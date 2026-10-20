@@ -489,7 +489,7 @@ function renderGuessers(){
   const g=game,entries=Object.values(g.results),solved=entries.filter(r=>r.solved&&!r.forfeit).length;
   $('guessProgress').textContent=entries.some(r=>r.forfeit)?'画手空白超时 · 其余选手各 3 分':`${solved} / ${entries.length} 已猜中`;
   playerSeats.update(g,animating);
-  $('privacyNote').textContent=g.phase==='reveal'?'本题结束，所有答案已公开。':(!isRoom()&&g.artistHuman||isRoom()&&myArtist())?'画手可以参考错误答案来改画。':!g.players.some(p=>p.human)?'观战中：已判分的猜词与理由会显示在气泡和聊天中。':g.results[myId()]?.solved?'你已猜中，可查看已判分的全部回答。':isRoom()&&g.players.filter(p=>p.human).length>1?'本轮判分后公开错误答案；猜中后可查看全部回答。':'本轮判分后展示各位选手的回答。';
+  $('privacyNote').textContent=g.phase==='reveal'?'本题结束，所有答案已公开。':(!isRoom()&&g.artistHuman||isRoom()&&myArtist())?'画手可以参考错误答案来改画。':!g.players.some(p=>p.human)?'观战中：已判分的猜词与理由会显示在气泡和聊天中。':g.results[myId()]?.solved?'你已猜中，可查看已判分的全部回答。':'本轮判分后公开错误答案；猜中或本题结束后可查看全部回答。';
 }
 const COLORS=['#202633','#db2450','#f09524','#f3ca24','#30a357','#2983c7','#415ed1','#8150ca','#895b33','#e979ab','#ffffff'];
 $('colors').innerHTML=COLORS.map((c,i)=>`<button class="swatch ${i===0?'selected':''}" style="background:${c}" data-color="${c}" aria-label="${['黑色','红色','橙色','黄色','绿色','蓝色','靛蓝','紫色','棕色','粉色','白色'][i]}" aria-pressed="${i===0}"></button>`).join('');
