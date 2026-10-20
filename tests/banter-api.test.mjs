@@ -21,16 +21,24 @@ test('room @AI uses the host compatible API, records both sides, rejects imperso
     await until(async()=>{try{return (await fetch(base+'/api/auth/status')).ok;}catch{return false;}});
     const setup=await request('/api/auth/setup',{token:'banter-api-setup',username:'admin',name:'房主',password:'test-admin-password'}),host=setup.cookie;
     const cfg=(await request('/api/config',undefined,host)).value,original=cfg.players.find(p=>p.characterId==='gemini');
-    const player={...original,provider:'compatible',baseUrl:fixture.base,model:'fixture-vision',apiKey:key,reasoningEffort:'auto',timeoutSeconds:60,enabled:true};
+    const player={...original,provider:'compatible',baseUrl:fixture.base,model:'fixture-vision',apiKey:key,reasoningEffort:'auto',timeoutSeconds:60,enabled:false};
     await request('/api/config',{players:[player]},host);
-    const room=(await request('/api/rooms/create',{},host,201)).value.room;
+    let room=(await request('/api/rooms/create',{},host,201)).value.room;assert.equal(room.lobby.players.length,0);
+    room=(await request('/api/rooms/lobby',{roomId:room.id,playerIds:[player.id]},host)).value.room;
+    const page=await fetch(base+'/',{headers:{cookie:host}}),html=await page.text(),entry=html.match(/src="(\/_app\/([a-f0-9]{12})\/app\.mjs)"/);
+    assert(entry);assert.equal(entry[2],cfg.clientVersion);assert.equal(page.headers.get('cache-control'),'no-store');
+    const style=html.match(/href="(\/_app\/[a-f0-9]{12}\/room-style)"/);assert(style);const stylesheet=await fetch(base+style[1]);assert(stylesheet.ok);assert.match(stylesheet.headers.get('content-type'),/text\/css/);
+    const versionedModule=await fetch(base+'/_app/'+entry[2]+'/room-composer.mjs');assert(versionedModule.ok);assert((await versionedModule.text()).includes('roomComposerState'));
+    assert.equal((await fetch(base+'/_app/000000000000/app.mjs')).status,404);
     const guest=await request('/api/auth/guest',{code:room.id,name:'挑战玩家'},'',201),actor=guest.value.user.id;
     const readyState=async cookie=>(await request('/api/rooms/state',undefined,cookie)).value.room;
     assert.equal(room.lobby.players[0].id,player.id);
-    await request('/api/rooms/chat-ai',{roomId:room.id,targetId:player.id,text:'开局前先打个招呼。',fromId:setup.value.user.id},guest.cookie,202);
+    await request('/api/rooms/chat',{roomId:room.id,targetId:player.id,text:'开局前先打个招呼。',fromId:setup.value.user.id},guest.cookie,202);
     let ready=await until(async()=>{const s=await readyState(guest.cookie);return s.aiChat?.status==='complete'?s:null;});
     assert.equal(ready.game,null);assert.equal(ready.messages[0].playerId,actor);assert.equal(ready.messages[1].source,'model');assert.equal(ready.messages[1].model,'fixture-vision');
     const firstLobbyCall=fixture.calls.filter(c=>c.purpose==='banter').at(-1);assert.equal(firstLobbyCall.authorization,'Bearer '+key);assert(firstLobbyCall.prompt.includes('开局前先打个招呼。'));assert(firstLobbyCall.prompt.includes('现在没有正在进行的题目'));
+    await request('/api/rooms/chat-ai',{roomId:room.id,targetId:player.id,text:'房主的第一句也要回应。'},host,202);
+    ready=await until(async()=>{const s=await readyState(host);return s.aiChat?.status==='complete'?s:null;});assert.equal(ready.messages.at(-1).targetId,setup.value.user.id);
     await new Promise(resolve=>setTimeout(resolve,1050));fixture.setFailBanter(true);
     await request('/api/rooms/chat-ai',{roomId:room.id,targetId:player.id,text:'这一句失败后可以重试。'},guest.cookie,202);
     ready=await until(async()=>{const s=await readyState(host);return s.aiChat?.status==='error'?s:null;});
@@ -85,7 +93,7 @@ test('room @AI uses the host compatible API, records both sides, rejects imperso
     await request('/api/rooms/leave',{},observer.cookie);assert.equal((await state(host)).phase,'reveal');
     await request('/api/rooms/action',{...stamp,action:'finish'},host);
     const third=await request('/api/auth/guest',{code:room.id,name:'另一玩家'},'',201);
-    await request('/api/admin/defaults',{category:'动物',wordLevel:'easy',rounds:1,hintMode:'none',playerIds:[player.id],useCustomWords:true,customWords:['秘密甲','秘密乙','秘密丙','秘密丁']},host);
+    await request('/api/admin/defaults',{category:'动物',wordLevel:'easy',rounds:1,hintMode:'none',playerIds:[],useCustomWords:true,customWords:['秘密甲','秘密乙','秘密丙','秘密丁']},host);
     game=(await request('/api/rooms/start',{playerIds:[player.id],category:'动物',wordLevel:'easy',rounds:1,useCustomWords:true,banter:false},host,202)).value.room.game;
     while(!game.artistHuman){const current={gameId:game.id,index:game.index,turn:game.turn};await request('/api/rooms/action',{...current,action:'reveal'},host);await request('/api/rooms/action',{...current,action:'next'},host);game=await state(host);}
     const cookies=new Map([[setup.value.user.id,host],[actor,guest.cookie],[third.value.user.id,third.cookie]]),artistCookie=cookies.get(game.artistId),humanGuessers=game.players.filter(p=>p.human&&p.id!==game.artistId);

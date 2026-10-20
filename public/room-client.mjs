@@ -1,5 +1,5 @@
 // The existing arena owns presentation; this adapter only transports room state.
-export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},onError=()=>{},Socket=globalThis.WebSocket,url=globalThis.location}){
+export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},onError=()=>{},onRemoved=()=>{},Socket=globalThis.WebSocket,url=globalThis.location}){
   let room=null,socket=null,active=false,epoch=0,mutating=false,reconnectTimer,drawTimer,pending=null,lastDraw=0,connected=false;
   let lobbyQueue=Promise.resolve(),lobbyRevision=0;
   function connection(value,text){connected=value;onConnection(value,text);}
@@ -18,7 +18,7 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
       try{const data=JSON.parse(event.data);if(data.type==='state')adopt(data.room);else if(data.type==='error')onError(data.error);}
       catch{onError('房间同步失败，正在重新连接。');ws.close();}
     };
-    ws.onclose=()=>{if(socket!==ws)return;socket=null;cancelDrawing();connection(false,'连接断开，正在重连…');reconnectTimer=setTimeout(async()=>{try{await refresh();}catch(e){onError(e.message);}if(active&&room)connect();},1800);};
+    ws.onclose=event=>{if(socket!==ws)return;socket=null;cancelDrawing();if(event?.code===4003){epoch++;connection(false,'已被房主移出房间');onRemoved(event.reason||'你已被房主移出房间');adopt(null);return;}connection(false,'连接断开，正在重连…');reconnectTimer=setTimeout(async()=>{try{await refresh();}catch(e){onError(e.message);}if(active&&room)connect();},1800);};
     ws.onerror=()=>{if(socket===ws)connection(false,'实时连接不可用，正在重试…');};
   }
   async function refresh(){if(mutating)return;const token=epoch,data=await request('/api/rooms/state');if(!active||token!==epoch)return;adopt(data.room);if(!room&&socket)closeSocket();}
@@ -32,6 +32,7 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
   async function create(){await mutate('/api/rooms/create',{});connect();}
   async function join(code){await mutate('/api/rooms/join',{code});connect();}
   async function leave(){await mutate('/api/rooms/leave',{});epoch++;closeSocket();adopt(null);}
+  async function kick(userId){await mutate('/api/rooms/kick',{roomId:room?.id,userId});}
   async function start(options){cancelDrawing();await mutate('/api/rooms/start',options);}
   function lobby(options){
     const revision=++lobbyRevision,token=epoch,roomId=room?.id;
@@ -62,5 +63,5 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
     clearTimeout(drawTimer);drawTimer=setTimeout(flushDrawing,Math.max(0,90-(Date.now()-lastDraw)));
   }
   function suspend(){active=false;epoch++;closeSocket();}
-  return {get room(){return room;},get connected(){return connected;},enter,refresh,create,join,leave,start,lobby,chat,lobbyChat,retryLobbyChat,action,drawing,suspend};
+  return {get room(){return room;},get connected(){return connected;},enter,refresh,create,join,leave,kick,start,lobby,chat,lobbyChat,retryLobbyChat,action,drawing,suspend};
 }

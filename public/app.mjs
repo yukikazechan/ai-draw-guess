@@ -14,6 +14,7 @@ import {banterMarkup,banterPending,banterComposerMarkup,bindBanterControls,captu
 import {createRoomClient} from './room-client.mjs';
 import {roomComposerState,roomMessageAction} from './room-composer.mjs';
 import {createMobileRoster} from './mobile-roster.mjs';
+import {createSoundEngine,createSoundEvents} from './game-sounds.mjs';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -23,7 +24,9 @@ let modelCatalog=null,actionDraftScope='',hintMode='visual';
 let productionTrace=null,bucket=false,mobileDraftScope='',banterComposerKey='';
 let roomReady=false,roomEntering=false,roomLoading=false,lastRoomId='',roomLobbyKey='',roomStatus='正在连接房间…',roomEntryError='',roomChatBusy=false,roomChatScope='',roomChatReply='',roomChatOptions='';
 let roomSelectionKey='',roomSelectionTimer,lastRoomHostId='';
-const roomClient=createRoomClient({request:api,onChange:receiveRoom,onError:toast,onConnection:(connected,text)=>{roomStatus=text;$('roomConnection').textContent=text;document.body.classList.toggle('room-disconnected',mode==='online'&&!!roomClient.room&&!connected);if(config&&mode==='online'){actionKey='';render();}}});
+let clientVersion=new URL(import.meta.url).pathname.match(/^\/_app\/([a-f0-9]{12})\//)?.[1]||'',clientOutdated=false;
+const updateNotice=document.createElement('p');updateNotice.className='model-guide';updateNotice.hidden=true;updateNotice.setAttribute('role','alert');updateNotice.innerHTML='游戏已更新，请刷新页面后继续。 <button type="button">刷新页面</button>';document.body.prepend(updateNotice);updateNotice.querySelector('button').onclick=()=>location.reload();
+const roomClient=createRoomClient({request:api,onChange:receiveRoom,onError:toast,onRemoved:message=>{roomEntryError=message;const url=new URL(location.href);url.searchParams.delete('room');history.replaceState(null,'',url);toast(message);},onConnection:(connected,text)=>{roomStatus=text;$('roomConnection').textContent=text;document.body.classList.toggle('room-disconnected',mode==='online'&&!!roomClient.room&&!connected);if(config&&mode==='online'){actionKey='';render();}}});
 const isRoom=()=>mode==='online';
 const isHost=()=>!isRoom()||roomClient.room?.hostId===config?.user?.id;
 const isSpectator=()=>isRoom()&&game?.viewerRole==='spectator';
@@ -52,7 +55,7 @@ roomChatComposer.onsubmit=async e=>{
   let errorText='';roomChatBusy=true;
   try{const message=roomMessageAction(room,myId(),$('roomChatTarget').value,text);renderRoomChat();
     const sent=message.action==='chat'?(await roomClient.chat(text,message.extra.targetId),true):message.action==='lobby-ai'?(await roomClient.lobbyChat(text,message.extra.targetId),true):await act(message.action,message.extra);
-    if(sent&&roomClient.room?.id===room.id&&input.value.trim()===text)input.value='';
+    if(sent&&roomClient.room?.id===room.id&&input.value.trim()===text){input.value='';gameSound.play('send');}
   }catch(error){errorText=error.message;}finally{roomChatBusy=false;renderRoomChat();if(errorText)$('roomChatStatus').textContent=errorText;}
 };
 $('roomChatTarget').onchange=()=>renderRoomChat();
@@ -64,11 +67,28 @@ try{$('banterEnabled').checked=localStorage.getItem('drawguess.banter')!=='false
 $('banterEnabled').onchange=()=>{try{localStorage.setItem('drawguess.banter',String($('banterEnabled').checked));}catch{}};
 const banterFilter=document.createElement('option');banterFilter.value='banter';banterFilter.textContent='互怼与回应';$('conversationPanel').querySelector('select').append(banterFilter);
 const panelDrawer=createPanelDrawer(); 
+const soundToggle=document.createElement('button');soundToggle.type='button';soundToggle.className='quiet sound-toggle';soundToggle.dataset.soundToggle='true';document.querySelector('.topbar nav').append(soundToggle);
+const mobileSoundToggle=document.createElement('button');mobileSoundToggle.type='button';mobileSoundToggle.dataset.soundToggle='true';document.querySelector('.mobile-more-panel').append(mobileSoundToggle);
+const soundEvents=createSoundEvents();
+const gameSound=createSoundEngine({onState:updateSoundControls,onPlay:name=>{soundToggle.dataset.lastSound=name;soundToggle.dataset.soundCount=String(Number(soundToggle.dataset.soundCount||0)+1);}});
+function updateSoundControls(){
+  for(const button of [soundToggle,mobileSoundToggle]){
+    const enabled=String(gameSound.enabled);
+    if(button.dataset.enabled!==enabled){button.dataset.enabled=enabled;button.innerHTML=`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/>${gameSound.enabled?'<path d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/>':'<path d="m16 9 6 6m0-6-6 6"/>'}</svg><span>音效${gameSound.enabled?'开':'关'}</span>`;}
+    button.setAttribute('aria-pressed',enabled);button.setAttribute('aria-label',gameSound.enabled?'关闭音效':'开启音效');button.disabled=!gameSound.available;button.dataset.audioState=gameSound.state;button.title=gameSound.available?'游戏音效 · M 键切换':'当前浏览器不支持游戏音效';
+  }
+}
+async function toggleSound(){gameSound.setEnabled(!gameSound.enabled);if(gameSound.enabled){if(await gameSound.unlock())gameSound.play('tap');else toast('浏览器尚未允许播放声音，请再点击音效按钮重试。');}}
+soundToggle.onclick=toggleSound;mobileSoundToggle.onclick=toggleSound;updateSoundControls();
+document.addEventListener('pointerdown',()=>gameSound.unlock(),{capture:true,passive:true});
+document.addEventListener('keydown',event=>{gameSound.unlock();if(event.key.toLowerCase()==='m'&&!event.repeat&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.target.closest?.('input,textarea,select,[contenteditable="true"]')){event.preventDefault();toggleSound();}});
+document.addEventListener('click',event=>{const button=event.target.closest?.('button');if(!button||button.disabled||button.hasAttribute('data-sound-toggle')||button===syncAudioButton)return;gameSound.unlock().then(()=>gameSound.play(['undoButton','clearButton'].includes(button.id)?'undo':'tap'));});
+addEventListener('pagehide',()=>gameSound.close());
 const relayShowcase=createRelayShowcase($('results'),act);
 const productionLink=document.createElement('a');productionLink.href='/production.html';productionLink.target='_blank';productionLink.rel='noopener';productionLink.textContent='视频素材';productionLink.hidden=true;document.querySelector('.topbar nav').prepend(productionLink);
 const recordingStatus=document.createElement('span');recordingStatus.className='muted';recordingStatus.setAttribute('role','status');recordingStatus.hidden=true;document.querySelector('.game-controls').prepend(recordingStatus);
 const syncAudioButton=document.createElement('button');syncAudioButton.className='quiet';syncAudioButton.textContent='录音对时';syncAudioButton.hidden=true;document.querySelector('.game-controls').append(syncAudioButton);
-syncAudioButton.onclick=async()=>{try{const ac=new AudioContext();await ac.resume();const oscillator=ac.createOscillator(),gain=ac.createGain();oscillator.frequency.value=880;gain.gain.value=.15;oscillator.connect(gain);gain.connect(ac.destination);oscillator.start();oscillator.stop(ac.currentTime+.16);oscillator.onended=()=>ac.close();productionTrace?.emit('presentation',{action:'sync-audio'});await productionTrace?.flush();toast('已发出对时音，并在素材时间线留下标记。');}catch{toast('浏览器未能播放对时音，请允许播放声音后重试。');}};
+syncAudioButton.onclick=async()=>{if(!gameSound.enabled)return toast('请先开启音效，再播放对时音。');try{if(!await gameSound.unlock()||!gameSound.play('sync'))throw Error('audio');productionTrace?.emit('presentation',{action:'sync-audio'});await productionTrace?.flush();toast('已发出对时音，并在素材时间线留下标记。');}catch{toast('浏览器未能播放对时音，请允许播放声音后重试。');}};
 function recordingLinks(){if(!game?.recordingEnabled||$('results').querySelector('[data-production-links]'))return;const row=document.createElement('div');row.className='result-actions';row.dataset.productionLinks='true';row.innerHTML=`<a class="quiet download-link" href="/api/production?id=${encodeURIComponent(game.id)}" download>下载视频素材包</a><a class="quiet download-link" href="/production.html?id=${encodeURIComponent(game.id)}" target="_blank" rel="noopener">大画布回放</a><span class="muted">本局素材自动保存在服务器</span>`;$('results').prepend(row);}
 $('pauseSeats').onclick=()=>{const button=$('pauseSeats'),paused=button.getAttribute('aria-pressed')!=='true';button.setAttribute('aria-pressed',String(paused));button.textContent=paused?'继续动作':'暂停动作';$('mobilePauseSeats').setAttribute('aria-pressed',String(paused));$('mobilePauseSeats').textContent=button.textContent;playerSeats.setPaused(paused);};
 $('mobilePauseSeats').onclick=()=>$('pauseSeats').click();
@@ -86,8 +106,9 @@ $('mobilePrimary').onclick=()=>{const action=$('mobilePrimary').dataset.action;i
 const mobileDockSize=new ResizeObserver(entries=>{const height=entries[0]?.contentRect.height;if(height)document.documentElement.style.setProperty('--mobile-dock-height',Math.ceil($('mobileMatchDock').getBoundingClientRect().height)+'px');});mobileDockSize.observe($('mobileMatchDock'));
 addEventListener('pagehide',()=>mobileDockSize.disconnect(),{once:true});
 async function api(path,data) {
+  if(clientOutdated&&data!==undefined)throw new Error('游戏已更新，请刷新页面后继续。');
   let r;try{r=await fetch(path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json','X-Game-Request':'1'},body:JSON.stringify(data)});}catch{throw new Error('连接不到游戏服务，请检查网络后刷新重试。');}
-  const j=await r.json();if(r.status===401){const invite=new URL(location.href).searchParams.get('room');location.assign(invite?'/online?room='+encodeURIComponent(invite):'/online');throw new Error('登录已过期，请重新登录。');}if(!r.ok)throw new Error(j.error||'操作失败。');return j;
+  const j=await r.json();if(j.clientVersion){if(clientVersion&&j.clientVersion!==clientVersion){clientOutdated=true;updateNotice.hidden=false;roomClient.suspend();throw new Error('游戏已更新，请刷新页面后继续。');}clientVersion=j.clientVersion;}if(r.status===401){const invite=new URL(location.href).searchParams.get('room');location.assign(invite?'/online?room='+encodeURIComponent(invite):'/online');throw new Error('登录已过期，请重新登录。');}if(!r.ok)throw new Error(j.error||'操作失败。');return j;
 }
 function toast(s){$('toast').textContent=s;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,5500);}
 function confirmAction(title,text,yes='确定'){return new Promise(resolve=>{$('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmYes').textContent=yes;const d=$('confirmDialog');const close=value=>{d.close();resolve(value);};$('confirmYes').onclick=()=>close(true);$('confirmCancel').onclick=()=>close(false);d.oncancel=()=>resolve(false);d.showModal();});}
@@ -103,7 +124,7 @@ async function loadConfig(init=false,adminSettings=false){
 }
 function renderLobby(){
   const room=roomClient.room,roomMode=isRoom(),host=isHost();
-  if(roomMode&&room&&host&&(!game||game.phase==='finished'))selected=new Set([...selected].filter(id=>config.players.some(p=>p.id===id&&p.enabled)));
+  if(roomMode&&room&&host&&(!game||game.phase==='finished'))selected=new Set([...selected].filter(id=>config.players.some(p=>p.id===id)));
   document.body.classList.toggle('room-mode',roomMode);
   document.body.classList.toggle('room-disconnected',roomMode&&!!room&&!roomClient.connected);
   $('roomEntry').hidden=!roomMode||!!room;
@@ -193,12 +214,20 @@ function receiveRoom(next){
   render();
 }
 function renderRoomMembers(room){
-  const online=room.members.filter(p=>p.connected).length,markup=room.members.map(p=>`<article class="room-member${p.id===config.user.id?' is-self':''}" role="listitem"><span class="room-member-avatar" aria-hidden="true">${esc(Array.from(p.name||'?')[0])}</span><div class="room-member-copy"><strong>${esc(p.name)}${p.id===config.user.id?'（你）':''}</strong><div><span class="member-presence ${p.connected?'is-online':''}">${p.connected?'在线':'未连接'}</span>${p.id===room.hostId?'<span class="member-host">房主</span>':''}${p.role==='spectator'?'<span class="member-host">观战 · 下局参赛</span>':''}</div></div></article>`).join('');
+  const online=room.members.filter(p=>p.connected).length,markup=room.members.map(p=>`<article class="room-member${p.id===config.user.id?' is-self':''}" role="listitem"><span class="room-member-avatar" aria-hidden="true">${esc(Array.from(p.name||'?')[0])}</span><div class="room-member-copy"><strong>${esc(p.name)}${p.id===config.user.id?'（你）':''}</strong><div><span class="member-presence ${p.connected?'is-online':''}">${p.connected?'在线':'未连接'}</span>${p.id===room.hostId?'<span class="member-host">房主</span>':''}${p.role==='spectator'?'<span class="member-host">观战 · 下局参赛</span>':''}</div></div>${isHost()&&p.id!==config.user.id?`<button type="button" class="quiet member-remove" data-remove-member="${esc(p.id)}" aria-label="移除 ${esc(p.name)}">移除</button>`:''}</article>`).join('');
   $('roomMembers').innerHTML=markup;$('roomDialogMembers').innerHTML=markup;
   $('roomMemberCount').textContent=`${room.members.length} / 8 人 · ${online} 人在线`;
   $('roomDialogCount').textContent=`${room.members.length} / 8 人`;$('roomDialogCode').textContent='房间码：'+room.id;
   const url=new URL('/',location.origin);url.searchParams.set('mode','online');url.searchParams.set('room',room.id);$('roomInviteUrl').value=url.href;
 }
+async function removeRoomMember(event){
+  const button=event.target.closest('[data-remove-member]');if(!button||!isHost())return;
+  const member=roomClient.room?.members.find(p=>p.id===button.dataset.removeMember);if(!member)return;
+  const playing=game&&game.phase!=='finished'&&game.players.some(p=>p.human&&p.id===member.id);
+  if(!await confirmAction(`移除 ${member.name}？`,playing?'移除正在参赛的成员会结束当前局，并保留已有比分。对方将无法重新加入此房间。':'对方将离开房间，无法重新加入此房间。','移除成员'))return;
+  await roomTask(button,()=>roomClient.kick(member.id));
+}
+$('roomMembers').addEventListener('click',removeRoomMember);$('roomDialogMembers').addEventListener('click',removeRoomMember);
 async function enterRoomMode(){
   const invitation=new URL(location.href).searchParams.get('room');if(invitation)$('joinRoomCode').value=invitation;
   roomLoading=true;roomEntering=true;roomEntryError='';renderLobby();
@@ -235,6 +264,7 @@ async function act(action,extra={}){
   finally{inFlight--;updateMobileControls();maybeAuto();}
 }
 async function poll(){
+  if(clientOutdated)return;
   if(isRoom()){if(roomReady&&!roomEntering)await roomClient.refresh().catch(e=>toast(e.message));return;}
   if(polling)return;polling=true;
   try{const data=await api('/api/state');online=true;if(data.game?.mode==='relay'&&game?.id!==data.game.id){mode='relay';human=data.game.players.some(p=>p.human);selected=new Set(data.game.players.filter(p=>!p.human).map(p=>p.id));category=data.game.category;idiomLevel=data.game.wordLevel||data.game.idiomLevel||idiomLevel;renderLobby();}game=data.game;render();}catch(e){if(online)toast(e.message);online=false;}finally{polling=false;}
@@ -257,6 +287,7 @@ function render(){
   mobileRoster.update(game);
   const room=isRoom()?roomClient.room:null;
   conversation.update(room?{...(game||{}),id:game?.id||'room:'+room.id,players:game?.players||[],conversation:[...(game?.conversation||[]),...(room.messages||[])].sort((a,b)=>a.at-b.at)}:game);
+  const sound=soundEvents.update({game,room,viewerId:myId()});if(sound)gameSound.play(sound);
   renderRoomChat();
   renderBanterComposer();
   if(!game||game.phase!=='finished')relayShowcase.stop();
@@ -299,6 +330,8 @@ function renderRoomChat(){
 }
 function banterEntry(){return game?.banterEnabled&&game?.players.some(p=>p.id===myId()&&p.human)?'<button class="quiet" data-action="open-banter">@ 选手发起互怼</button>':'';}
 function updateCountdown(){
+  if(clientOutdated)return;
+  const sound=soundEvents.countdown(isRoom()?game:null,myId());if(sound)gameSound.play(sound);
   const timer=$('roundTimer'),clock=game?.clock,active=isRoom()&&clock&&game.phase!=='finished';timer.hidden=!active;if(!active)return;
   const offset=clock.serverNow-(game.clockReceivedAt||Date.now());
   const seconds=Math.max(0,Math.ceil((clock.deadline-Date.now()-offset)/1000)),label=`${({draw:'作画',guess:'猜词',revise:'自动补画',ready:'开始猜题'})[clock.stage]||'倒计时'} ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
@@ -472,7 +505,7 @@ $('undoButton').onclick=undo;
 $('clearButton').onclick=()=>{if(canDraw()&&!currentStroke&&localShapes.length){localShapes=drawingHistory.clear(localShapes);paint(canvas,localShapes);productionTrace?.edit(localShapes,'clear');syncRoomDrawing();}};
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)){e.preventDefault();undo();}});
 function point(e){const b=canvas.getBoundingClientRect();return [Math.max(0,Math.min(W,Math.round((e.clientX-b.left)*W/b.width))),Math.max(0,Math.min(H,Math.round((e.clientY-b.top)*H/b.height)))];}
-canvas.onpointerdown=e=>{if(!canDraw()||localShapes.length>=440||currentStroke)return;e.preventDefault();if(bucket){const [x,y]=point(e);drawingHistory.stroke(localShapes.length);localShapes.push({type:'bucket',x:Math.min(W-1,x),y:Math.min(H-1,y),color});paint(canvas,localShapes);productionTrace?.edit(localShapes,'fill');syncRoomDrawing();return;}productionTrace?.beginStroke();canvas.setPointerCapture(e.pointerId);drawingHistory.stroke(localShapes.length);const p=point(e);currentStroke={type:'line',points:[p,[p[0]+(p[0]<1000?.01:0),p[1]]],color:erasing?'#ffffff':color,width:erasing?24:+$('brushSize').value};localShapes.push(currentStroke);drawShape(canvas.getContext('2d'),currentStroke);syncRoomDrawing();};
+canvas.onpointerdown=e=>{if(!canDraw()||localShapes.length>=440||currentStroke)return;e.preventDefault();gameSound.play(bucket?'fill':'brush');if(bucket){const [x,y]=point(e);drawingHistory.stroke(localShapes.length);localShapes.push({type:'bucket',x:Math.min(W-1,x),y:Math.min(H-1,y),color});paint(canvas,localShapes);productionTrace?.edit(localShapes,'fill');syncRoomDrawing();return;}productionTrace?.beginStroke();canvas.setPointerCapture(e.pointerId);drawingHistory.stroke(localShapes.length);const p=point(e);currentStroke={type:'line',points:[p,[p[0]+(p[0]<1000?.01:0),p[1]]],color:erasing?'#ffffff':color,width:erasing?24:+$('brushSize').value};localShapes.push(currentStroke);drawShape(canvas.getContext('2d'),currentStroke);syncRoomDrawing();};
 canvas.onpointermove=e=>{if(!currentStroke||!canDraw())return;e.preventDefault();for(const v of e.getCoalescedEvents?.()||[e]){const p=point(v),last=currentStroke.points.at(-1);if(Math.hypot(p[0]-last[0],p[1]-last[1])<1)continue;if(currentStroke.points.length>=1700){if(localShapes.length>=440)break;const s={...currentStroke,points:[last,p]};localShapes.push(s);currentStroke=s;}else currentStroke.points.push(p);drawShape(canvas.getContext('2d'),{...currentStroke,points:[last,p]});}syncRoomDrawing();};
 const endStroke=()=>{if(currentStroke)productionTrace?.edit(localShapes,'stroke');currentStroke=null;syncRoomDrawing();};canvas.onpointerup=endStroke;canvas.onpointercancel=endStroke;canvas.onlostpointercapture=endStroke;
 

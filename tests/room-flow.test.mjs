@@ -70,3 +70,28 @@ test('AI 开口期间收件人离开，完成后不会再等待离开的真人',
   try{const task=banter.start();present.delete('human');banter.humanLeft('human');resolve({line:'你怎么看？'});await task;assert.equal(banter.status,'complete');assert.equal(banter.exchanges[0].status,'skipped');assert.equal(published.length,1);}
   finally{banter.stop();}
 });
+
+test('只有房主可以移除离线成员，被移除账号不能自动重入同房间',()=>{
+  const host={id:'h',name:'房主'},member={id:'m',name:'成员'},other={id:'o',name:'另一人'},rooms=new Rooms({accounts:{},recordings:{},makeOptions(){}});
+  try{
+    rooms.create(host);const room=rooms.require(host);rooms.join(member,room.id);rooms.join(other,room.id);
+    assert.throws(()=>rooms.kick(other,{roomId:room.id,userId:member.id}),/只有房主/);assert.throws(()=>rooms.kick(host,{roomId:room.id,userId:host.id}),/离开房间/);
+    rooms.kick(host,{roomId:room.id,userId:member.id});assert(!room.members.has(member.id));assert(!rooms.byUser.has(member.id));assert.throws(()=>rooms.join(member,room.id),/移出/);
+    assert.equal(room.members.size,2);
+  }finally{rooms.close();}
+});
+
+test('移除参赛者会结束比赛，移除观众不会影响当前局',async()=>{
+  const h={id:'h',name:'房主'},m={id:'m',name:'成员'},v={id:'v',name:'观众'},rooms=new Rooms({accounts:{charge(){},own(){}},recordings:{attach(){}},makeOptions:()=>({players:[],category:'动物',orderRandom:n=>n-1})});
+  try{
+    rooms.create(h);const room=rooms.require(h);rooms.join(m,room.id);await rooms.start(h,{});rooms.join(v,room.id);
+    rooms.kick(h,{roomId:room.id,userId:v.id});assert.equal(room.game.phase,'drawing');rooms.kick(h,{roomId:room.id,userId:m.id});assert.equal(room.game.phase,'finished');
+  }finally{rooms.close();}
+});
+
+test('收到移除通知后停止重连并回到大厅',async()=>{
+  const sockets=[],removed=[];class RemovedSocket{constructor(){sockets.push(this);}close(){} }
+  const client=createRoomClient({Socket:RemovedSocket,url,request:async()=>({room:{id:'r',version:1,game:null}}),onRemoved:text=>removed.push(text)});
+  try{await client.enter();sockets[0].onclose({code:4003,reason:'已被移出'});assert.equal(client.room,null);assert.deepEqual(removed,['已被移出']);assert.equal(sockets.length,1);}
+  finally{client.suspend();}
+});

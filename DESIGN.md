@@ -1,5 +1,9 @@
 # Existing visual system
 
+Room member cards expose a compact “移除” action only to the host; a confirmation explains whether removing that member ends the current match. The sound control uses an authored speaker icon in the existing desktop navigation and a labelled item in the mobile More menu. Sound cues are short synthesized notes, unlocked by a gesture, with a persistent mute preference; they do not replay historical messages or signal another player's hidden answer.
+
+AI chat messages show pending, failed or cancelled delivery on their original row. Delivery changes update the existing message node. Responses remain associated with the actual target model, and unrelated lobby selection updates do not cancel an in-flight first response. Content-versioned module paths keep host and guest code aligned; an outdated client displays a refresh action.
+
 Before a match and on the finished-match page, the same room composer lists AI models from the host's selected lobby roster and sends to the lobby conversation endpoint. It retains the selected recipient during replies, labels AI responses with their actual model, exposes retry for the sender/host, and explains that AI can be addressed before starting. No second form or separate chat screen is added. During a match the composer returns to the existing reveal-only AI interaction rules.
 
 The message recipient stays selected across an AI response so follow-up lines remain addressed to that AI. While it responds, only sending to that selected AI pauses; the recipient control still allows ordinary human chat. Host changes update results-page actions immediately and reset lobby choices to the new host's own model configuration. Spectators do not see export links they cannot access.

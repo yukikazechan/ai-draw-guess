@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Rooms} from '../lib/rooms.mjs';
 import {callModel} from '../lib/providers.mjs';
 import {roomComposerState,roomMessageAction} from '../public/room-composer.mjs';
+import {lobbyChatError} from '../lib/lobby-chat.mjs';
 
 const host={id:'host',name:'房主',role:'admin'},guest={id:'guest',name:'加入者'},other={id:'other',name:'另一人'};
 const model={id:'ai',name:'Gemini',characterId:'gemini',provider:'compatible',model:'host-model',baseUrl:'https://example.com/v1',apiKey:'PRIVATE-HOST-KEY'};
@@ -45,6 +46,25 @@ test('准备聊天失败可由发起者或房主重试，保留原消息且不�
   }finally{rooms.close();}
 });
 
+test('首条请求不会被首次模型元信息同步或添加其他 AI 的后台同步取消',async()=>{
+  let resolve;const {rooms,room,calls}=setup(()=>new Promise(done=>resolve=done));
+  try{
+    room.lobby.players[0].model='earlier-config-model';
+    assert.equal(rooms.chat(host,{roomId:room.id,targetId:'ai',text:'房主的第一句。'}),true);const task=room.aiTask;
+    rooms.setLobby(host,{playerIds:['ai','alt']});assert(!calls[0].signal.aborted);assert.equal(room.messages[0].delivery,'pending');
+    resolve({line:'第一句就能回应。'});await task;
+    assert.equal(room.messages[0].delivery,'replied');assert.equal(room.messages[1].replyTo,room.messages[0].requestId);assert.equal(room.messages[1].targetId,host.id);
+  }finally{rooms.close();}
+});
+
+test('准备聊天的失败和取消状态保留在原消息上，不会静默消失',async()=>{
+  let resolve;const {rooms,room}=setup(()=>new Promise(done=>resolve=done));
+  try{
+    rooms.lobbyAI(guest,{roomId:room.id,targetId:'ai',text:'等待回应。'});const task=room.aiTask;rooms.setLobby(host,{playerIds:['alt']});
+    assert.equal(room.messages[0].delivery,'cancelled');assert.match(room.messages[0].deliveryText,/取消/);resolve({line:'迟到结果'});await task;assert.equal(room.messages.length,1);
+  }finally{rooms.close();}
+});
+
 for(const action of ['start','selection','host-leave','sender-leave'])test(`准备聊天在 ${action} 后取消，迟到回复不能污染房间或比赛`,async()=>{
   let resolve;const {rooms,room,calls}=setup(()=>new Promise(done=>resolve=done));
   try{
@@ -65,4 +85,11 @@ test('504/524 返回清楚的上游超时提示，不回显任意错误正文，
     let calls=0;await assert.rejects(callModel(model,'fixture',null,null,null,{modelProfile:null,fetchImpl:async()=>{calls++;return new Response('PRIVATE-HOST-KEY',{status});}}),error=>error.message.includes('上游等待模型响应超时')&&!error.message.includes(model.apiKey));
     assert.equal(calls,1);
   }
+});
+
+test('聊天失败区分超时、JSON 格式和参数错误，并且不反射任意上游内容',()=>{
+  assert.match(lobbyChatError(new Error('接口已处理 60 秒仍未完成（不含排队）。')),/60 秒.*超时/);
+  assert.match(lobbyChatError(new SyntaxError('Expected property')),/格式不正确/);
+  assert.match(lobbyChatError(new Error('API 400：参数不受支持。')),/检查型号和思考档位/);
+  assert(!lobbyChatError(new Error('unknown '+model.apiKey)).includes(model.apiKey));
 });

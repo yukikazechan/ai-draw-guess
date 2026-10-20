@@ -30,6 +30,11 @@
 .room-members{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 .room-member{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border-radius:7px;background:#e3eaf5;font-size:14px;overflow-wrap:anywhere}
 .room-member small{color:#58677f;font-size:12px}
+.room-member .member-remove{flex:none;margin-left:auto;min-height:32px;padding:5px 8px;font-size:13px;color:#96324c}
+.sound-toggle{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.mobile-more-panel [data-sound-toggle]{display:flex;align-items:center;gap:8px;min-height:44px}
+@media(max-width:800px){.arena-board .topbar .sound-toggle{display:none}}
+@media(max-width:650px){.room-member .member-remove{min-height:44px;padding:7px 9px}}
 .room-custom-words{margin:16px 4px}
 body.room-mode .intro{padding-top:24px}
 body.room-mode .intro h1{font-size:clamp(30px,3vw,44px)}

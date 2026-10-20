@@ -13,6 +13,7 @@ export function messageLabel(message){
 export function messageBody(message){
   if(message.kind==='guess')return `<p class="speech-guess">${message.skipped?'这次先跳过。':`我猜：<strong>${esc(message.text)}</strong>`}</p>${message.reason?`<p class="speech-reason">${esc(message.reason)}</p>`:''}${!message.skipped?`<p class="speech-verdict ${message.correct?'right':'wrong'}">${message.correct?`猜中 · +${message.points} 分`:'这次没猜中'}${matchNote(message.match)?`<br>${matchNote(message.match)}`:''}</p>`:''}`;
   let html=`<p>${esc(message.text)}</p>`;
+  if(message.kind==='chat'&&['pending','error','cancelled'].includes(message.delivery))html+=`<p class="speech-reason${message.delivery==='error'?' error-message':''}" role="status">${esc(message.deliveryText||'正在等待回应…')}</p>`;
   if(message.kind==='answer')html+=`<p class="speech-reason">${message.solved||0} 位选手猜中</p>`;
   if(message.kind==='recap'&&message.trail?.length)html+=`<details class="speech-trail"><summary>心路历程 · ${message.trail.length} 次猜词</summary><ol>${message.trail.map(h=>`<li><b>第 ${h.turn} 次：${esc(h.guess)}</b>${h.reason?`<span>${esc(h.reason)}</span>`:''}</li>`).join('')}</ol><small>回顾已提交的猜词与简短理由</small></details>`;
   return html;
@@ -39,8 +40,9 @@ export function createConversation(panel){
     let previous=null;
     for(const m of visible){
       let node=nodes.get(m.id);
-      if(!node){node=document.createElement('article');node.className=`chat-message chat-${m.kind}`;node.dataset.messageId=m.id;node.style.setProperty('--speaker',/^#[0-9a-f]{6}$/i.test(m.color||'')?m.color:'#67738f');
-        node.innerHTML=`<header><span class="chat-round">${m.kind==='chat'?'房间':`第 ${(m.chainIndex??m.index)+1} ${m.chainIndex!=null?'条链':m.mode==='relay'?'棒':'题'}`}${['guess','hint'].includes(m.kind)?` · 第 ${m.turn} 轮`:''}</span><strong>${esc(m.name)}</strong>${m.model?`<small class="chat-model">${esc(m.model)}</small>`:''}<span class="chat-kind">${esc(messageLabel(m))}</span></header>${messageBody(m)}`;nodes.set(m.id,node);
+      if(!node){node=document.createElement('article');node.className=`chat-message chat-${m.kind}`;node.dataset.messageId=m.id;node.style.setProperty('--speaker',/^#[0-9a-f]{6}$/i.test(m.color||'')?m.color:'#67738f');nodes.set(m.id,node);}
+      const renderKey=JSON.stringify(m);if(node.dataset.renderKey!==renderKey){node.dataset.renderKey=renderKey;
+        node.innerHTML=`<header><span class="chat-round">${m.kind==='chat'?'房间':`第 ${(m.chainIndex??m.index)+1} ${m.chainIndex!=null?'条链':m.mode==='relay'?'棒':'题'}`}${['guess','hint'].includes(m.kind)?` · 第 ${m.turn} 轮`:''}</span><strong>${esc(m.name)}</strong>${m.model?`<small class="chat-model">${esc(m.model)}</small>`:''}<span class="chat-kind">${esc(messageLabel(m))}</span></header>${messageBody(m)}`;
       }
       // Previously private messages may be revealed later: insert them at their original place.
       const expected=previous?previous.nextElementSibling:log.firstElementChild;if(node!==expected)log.insertBefore(node,expected);previous=node;

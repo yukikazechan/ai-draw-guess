@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {createHash} from 'node:crypto';
 import {existsSync,writeFileSync,renameSync} from 'node:fs';
 import {readFile,writeFile,mkdir,rename,readdir,appendFile} from 'node:fs/promises';
 import {join,dirname} from 'node:path';
@@ -42,7 +43,8 @@ const online=new OnlineServer({directory:LOCAL,port:PORT,getConfig:()=>config,re
   writeFileSync(join(LOCAL,'config.tmp'),JSON.stringify(metadata,null,2),{mode:0o600});renameSync(join(LOCAL,'config.tmp'),join(LOCAL,'config.json'));
   writeFileSync(join(LOCAL,'credentials.tmp'),JSON.stringify({migrated:true}),{mode:0o600});renameSync(join(LOCAL,'credentials.tmp'),join(LOCAL,'credentials.json'));config=metadata;
 }});
-const json=(res,data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
+let clientVersion='';
+const json=(res,data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify({...data,clientVersion}));};
 function session(req,res){
   const id=req.user.id;if(!sessions.has(id))sessions.set(id,{game:null,last:Date.now()});
   const s=sessions.get(id);s.last=Date.now();return s;
@@ -50,7 +52,7 @@ function session(req,res){
 async function body(req){let chunks=[],size=0;for await(const c of req){size+=c.length;if(size>4_000_000)throw new Error('请求太大。');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new Error('请求格式无效。');}}
 function launch(g,fn){Promise.resolve().then(fn).catch(e=>{if(!g.aborted){g.notice=e.message;g.touch();}});}
 const allowedFiles=new Map([['/','index.html'],...['index.html','app.mjs','relay-view.mjs','relay.css','model-picker.mjs','reasoning.mjs','guess-confidence.mjs','drawing.mjs','visual-hints.mjs','drawing-playback.mjs','characters.mjs','characters.html','characters-review.mjs','style.css','fonts.css','help.html','avatar.html','avatar.css','avatar-preview.mjs','avatar-game.mjs','player-seats.mjs','conversation.mjs','panel-drawer.mjs','seat-presentation.mjs','avatar-state.mjs','avatar-renderer.mjs'].map(f=>['/'+f,f])]);
-for(const file of ['production.html','production.css','production.mjs','production-player.mjs','recording-client.mjs','banter-view.mjs','room-client.mjs','room-composer.mjs','round-results.mjs','mobile-roster.mjs','room.css'])allowedFiles.set('/'+file,file);
+for(const file of ['production.html','production.css','production.mjs','production-player.mjs','recording-client.mjs','banter-view.mjs','room-client.mjs','room-composer.mjs','round-results.mjs','mobile-roster.mjs','room.css','game-sounds.mjs'])allowedFiles.set('/'+file,file);
 for(const file of ['online.html','online.css','online.mjs'])allowedFiles.set('/'+file,file);
 allowedFiles.set('/avatar-loader.mjs','avatar-loader.mjs');
 allowedFiles.set('/online','online.html');
@@ -58,16 +60,25 @@ const types={html:'text/html; charset=utf-8',mjs:'text/javascript; charset=utf-8
 // Only explicitly published runtime assets are served; never follow symlinks or expose .local/source files.
 async function registerAssets(dir){for(const item of await readdir(join(ROOT,'public',dir),{withFileTypes:true})){const file=dir+'/'+item.name;if(item.isDirectory())await registerAssets(file);else if(item.isFile()&&types[item.name.split('.').pop()])allowedFiles.set('/'+file,file);}}
 await registerAssets('vendor');await registerAssets('models');await registerAssets('fonts');
+const frontendFiles=[...new Set(allowedFiles.values())].filter(file=>!file.includes('/')&&/\.(mjs|css|html)$/.test(file)).sort();
+const frontendSources=await Promise.all(frontendFiles.map(file=>readFile(join(ROOT,'public',file)).catch(error=>{if(error.code==='ENOENT')return Buffer.alloc(0);throw error;})));
+const frontendHash=createHash('sha256');frontendFiles.forEach((file,index)=>frontendHash.update(file).update(frontendSources[index]));clientVersion=frontendHash.digest('hex').slice(0,12);
+const assetPrefix=`/_app/${clientVersion}/`;
 const server=http.createServer(async(req,res)=>{
   try {
     const host=req.headers.host;if(!online.hosts.has(host))return json(res,{error:'站点地址未获授权，请配置 PUBLIC_ORIGIN。'},403);
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
     const socketOrigins=[...online.origins].map(origin=>origin.replace(/^http/,'ws')).join(' ');
     res.setHeader('Content-Security-Policy',`default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${socketOrigins}; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
-    const url=new URL(req.url,'http://'+host),path=url.pathname;
+    const url=new URL(req.url,'http://'+host),versioned=url.pathname.startsWith(assetPrefix),assetPath=versioned?'/'+url.pathname.slice(assetPrefix.length):url.pathname,path=versioned&&assetPath.endsWith('-style')?assetPath.slice(0,-6)+'.css':assetPath;
     req.user=online.accounts.authenticate(req);
     if(req.method==='GET'&&['/','/index.html'].includes(path)&&!req.user){const invite=url.searchParams.get('room');res.writeHead(302,{Location:invite?'/online?room='+encodeURIComponent(invite):'/online'});return res.end();}
-    if(req.method==='GET'&&allowedFiles.has(path)){const file=allowedFiles.get(path);res.writeHead(200,{'Content-Type':types[file.split('.').pop()],'Cache-Control':/^\/(models|vendor|fonts)\//.test(path)&&/\.(png|webp|avif|moc3|ttf|js)$/.test(file)?'public, max-age=86400':'no-cache'});return res.end(await readFile(join(ROOT,'public',file)));}
+    if(req.method==='GET'&&allowedFiles.has(path)){
+      const file=allowedFiles.get(path),html=file.endsWith('.html');
+      res.writeHead(200,{'Content-Type':types[file.split('.').pop()],'Cache-Control':html?'no-store':versioned?'public, max-age=31536000, immutable':/^\/(models|vendor|fonts)\//.test(path)&&/\.(png|webp|avif|moc3|ttf|js)$/.test(file)?'public, max-age=86400':'no-cache'});
+      const content=await readFile(join(ROOT,'public',file));
+      return res.end(html?content.toString('utf8').replace(/(src|href)="\/(?!_app\/)([^"?]+\.(?:mjs|css))(?:\?[^\"]*)?"/g,(_match,attr,asset)=>`${attr}="${assetPrefix}${asset.endsWith('.css')?asset.slice(0,-4)+'-style':asset}"`):content);
+    }
     if(!path.startsWith('/api/'))return json(res,{error:'未找到。'},404);
     if(req.method==='POST') {
       if(req.headers['x-game-request']!=='1'||!req.headers['content-type']?.includes('application/json'))return json(res,{error:'请求来源无效。'},403);
