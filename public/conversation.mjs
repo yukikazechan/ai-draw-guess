@@ -3,6 +3,7 @@ export const escapeText=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 const esc=escapeText;
 export const matchNote=match=>({'idiom-order':'四个字齐全，顺序不同也算对','idiom-three':'三个字位置正确，也算对'})[match]||'';
 export function messageLabel(message){
+  if(message.delivery&&message.source==='model')return message.delivery==='pending'?'正在回应':message.delivery==='error'?'回应失败':'回应已取消';
   if(message.kind==='chat')return `${message.source==='model'?'AI 回应':message.spectator?'观战发言':'聊天'}${message.targetName?' → '+message.targetName:''}`;
   if(message.kind==='forfeit')return '超时判分';
   if(message.kind==='guess'&&message.timedOut)return '作答超时';
@@ -11,12 +12,33 @@ export function messageLabel(message){
   return ({round:'新题目',answer:'揭晓',guess:message.skipped?'跳过':'猜词',hint:message.recipientId?`只对 ${message.recipientName||'你'} 说`:'公开提示',recap:message.source==='model'?'一句话复盘':'记录摘要'})[message.kind]||'消息';
 }
 export function messageBody(message){
+  if(message.source==='model'&&message.delivery)return `<p class="speech-reason${message.delivery==='error'?' error-message':''}" role="status"${message.delivery==='pending'?' aria-live="polite" aria-busy="true"':''}>${esc(message.text)}</p>`;
   if(message.kind==='guess')return `<p class="speech-guess">${message.skipped?'这次先跳过。':`我猜：<strong>${esc(message.text)}</strong>`}</p>${message.reason?`<p class="speech-reason">${esc(message.reason)}</p>`:''}${!message.skipped?`<p class="speech-verdict ${message.correct?'right':'wrong'}">${message.correct?`猜中 · +${message.points} 分`:'这次没猜中'}${matchNote(message.match)?`<br>${matchNote(message.match)}`:''}</p>`:''}`;
   let html=`<p>${esc(message.text)}</p>`;
   if(message.kind==='chat'&&['pending','error','cancelled'].includes(message.delivery))html+=`<p class="speech-reason${message.delivery==='error'?' error-message':''}" role="status">${esc(message.deliveryText||'正在等待回应…')}</p>`;
   if(message.kind==='answer')html+=`<p class="speech-reason">${message.solved||0} 位选手猜中</p>`;
   if(message.kind==='recap'&&message.trail?.length)html+=`<details class="speech-trail"><summary>心路历程 · ${message.trail.length} 次猜词</summary><ol>${message.trail.map(h=>`<li><b>第 ${h.turn} 次：${esc(h.guess)}</b>${h.reason?`<span>${esc(h.reason)}</span>`:''}</li>`).join('')}</ol><small>回顾已提交的猜词与简短理由</small></details>`;
   return html;
+}
+// Pending and final AI lines share one UI identity. Never invent a model reply.
+export function responseMessages(game){
+  const messages=(game.conversation||[]).map(m=>({...m,...(m.kind==='banter'&&m.source==='model'?{id:`ai-response:${m.exchangeId}:${!!m.reply}`} :m.kind==='chat'&&m.source==='model'&&m.replyTo?{id:`lobby-response:${m.replyTo}`}:{})}));
+  const groups=[...(game.banter?[{banter:game.banter,index:game.index}]:[]),...(game.relay?.showcase?.ballots||[]).flatMap((ballot,chainIndex)=>ballot.banter?[{banter:ballot.banter,chainIndex,index:game.index}]:[])];
+  for(const {banter,index,chainIndex} of groups)for(const exchange of banter.exchanges||[]){
+    if(!['opening','replying','error','skipped'].includes(exchange.status))continue;
+    if(!exchange.requestAt)continue;
+    const reply=exchange.status==='opening'?false:exchange.status==='replying'?true:!!exchange.opener,playerId=reply?exchange.toId:exchange.fromId,player=game.players?.find(p=>p.id===playerId);
+    const id=`ai-response:${exchange.id}:${reply}`;
+    if(!player||player.human||exchange.reply||messages.some(m=>m.id===id))continue;
+    const delivery=exchange.status==='error'?'error':exchange.status==='skipped'?'cancelled':'pending';
+    messages.push({id,kind:'banter',index,chainIndex,playerId,name:player.name,color:player.color,source:'model',exchangeId:exchange.id,reply,targetName:reply?exchange.fromName:exchange.toName,delivery,text:delivery==='pending'?`${player.name} 正在回应…`:delivery==='error'?exchange.error||'AI 回应失败，可重试。':'本次回应已取消。',at:exchange.requestAt||0});
+  }
+  for(const request of game.conversation||[]){
+    if(request.kind!=='chat'||!request.requestId||request.source!=='human'||!['pending','error','cancelled'].includes(request.delivery))continue;
+    const id=`lobby-response:${request.requestId}`;if(messages.some(m=>m.id===id))continue;
+    messages.push({id,kind:'chat',playerId:request.targetId,name:request.targetName,source:'model',targetName:request.name,delivery:request.delivery,text:request.delivery==='pending'?`${request.targetName||'AI'} 正在回应…`:request.deliveryText||'本次回应已取消。',at:request.at});
+  }
+  return messages.sort((a,b)=>(a.at||0)-(b.at||0));
 }
 export function latestSpeech(game,playerId){
   const messages=(game?.conversation||[]).filter(m=>m.index===game.index&&m.playerId===playerId&&['guess','hint','recap','relay-status','banter'].includes(m.kind));
@@ -73,7 +95,7 @@ export function createConversation(panel){
   function update(game){
     panel.hidden=!game;if(!game)return;
     if(gameId!==game.id){gameId=game.id;nodes.clear();log.replaceChildren();key='';filterKey='';filter.value='all';follow.checked=true;newButton.hidden=true;}
-    messages=(game.conversation||[]).map(m=>{const p=game.players?.find(p=>p.id===m.playerId);return {...m,model:m.kind==='chat'&&m.source==='model'?m.model||'':p&&!p.human?playerModelLabel(p):''};});render();
+    messages=responseMessages(game).map(m=>{const p=game.players?.find(p=>p.id===m.playerId);return {...m,model:m.kind==='chat'&&m.source==='model'?m.model||'':p&&!p.human?playerModelLabel(p):''};});render();
   }
   return {update};
 }

@@ -22,6 +22,8 @@ export function seatPresentation(game,player,animating=false){
   const state=characterState(game,player,animating);
   if(state==='spectator')status=`已猜中 · 围观中 · +${result.points} 分`;
   if(result?.forfeit)status='画手空白超时 · +3 分';
+  if(result?.retrying&&['queued','thinking'].includes(result.status))status='暂时失败 · 自动重试中…';
+  if(result?.history?.at(-1)?.callFailed&&result.history.at(-1).turn===game.turn)status='本次调用失败 · 0 分';
   return {state,status,role:artist?'画手':'猜手',artist,result,total:player.total||0};
 }
 

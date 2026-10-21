@@ -195,6 +195,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(path==='/api/action') {
       const g=s.game;if(!g||g.id!==data.gameId)throw new Error('比赛已变更，请刷新页面。');
+      if(data.index!==undefined&&data.index!==g.index||data.turn!==undefined&&data.turn!==g.turn)throw new Error('题目已更新，请重试。');
       if(data.action==='banter-challenge'){g.challengePlayer(data);return json(res,{ok:true});}
       if(['banter-reply','banter-retry','banter-skip'].includes(data.action)){
         const b=g.mode==='relay'&&g.showcase?.status==='result'?g.showcase.banter:g.phase==='reveal'?g.banter:null;
@@ -225,15 +226,15 @@ const server=http.createServer(async(req,res)=>{
         return json(res,{ok:true});
       }
       switch(data.action) {
-        case 'draw-done': await g.beginGuess(data);break;
+        case 'draw-done': {const pending=g.startGuess(data);launch(g,()=>pending);break;}
         case 'guess':g.humanGuess(data.guess);break;
         case 'pass':g.humanGuess('',true);break;
-        case 'revise':await g.revise();break;
-        case 'retry-draw':if(g.phase!=='draw-error')throw new Error('当前不能重试。');await g.drawAI();break;
-        case 'retry-guesses':if(g.phase!=='guessing'||!Object.values(g.results).some(r=>r.status==='error'))throw new Error('没有需要重试的选手。');await g.guessAIs(true);break;
+        case 'revise':if(g.phase!=='review')throw new Error('当前不能改画。');launch(g,()=>g.revise());break;
+        case 'retry-draw':if(g.phase!=='draw-error')throw new Error('当前不能重试。');launch(g,()=>g.drawAI());break;
+        case 'retry-guesses':if(g.phase!=='guessing'||!Object.values(g.results).some(r=>r.status==='error'))throw new Error('没有需要重试的选手。');launch(g,()=>g.guessAIs(true));break;
         case 'skip-errors':g.skipErrors();break;
         case 'reveal':g.reveal();break;
-        case 'next':await g.next();break;
+        case 'next':if(!['idle','reveal'].includes(g.phase))throw new Error('先完成当前题。');launch(g,()=>g.next());break;
         case 'finish':g.finish();break;
         case 'home':g.finish();s.game=null;break;
         default:throw new Error('未知操作。');

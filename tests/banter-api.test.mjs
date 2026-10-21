@@ -7,6 +7,8 @@ import {join} from 'node:path';
 import {once} from 'node:events';
 import net from 'node:net';
 import {startCompatibleFixture} from './fixtures/openai-compatible.mjs';
+import {responseMessages} from '../public/conversation.mjs';
+import {renderRelayDrawing} from '../lib/relay-renderer.mjs';
 
 async function until(fn){const end=Date.now()+15000;while(Date.now()<end){const value=await fn();if(value)return value;await new Promise(r=>setTimeout(r,30));}throw new Error('Timed out waiting for the real room API.');}
 
@@ -33,7 +35,9 @@ test('room @AI uses the host compatible API, records both sides, rejects imperso
     const guest=await request('/api/auth/guest',{code:room.id,name:'挑战玩家'},'',201),actor=guest.value.user.id;
     const readyState=async cookie=>(await request('/api/rooms/state',undefined,cookie)).value.room;
     assert.equal(room.lobby.players[0].id,player.id);
+    const releaseLobby=fixture.hold('banter');
     await request('/api/rooms/chat',{roomId:room.id,targetId:player.id,text:'开局前先打个招呼。',fromId:setup.value.user.id},guest.cookie,202);
+    const lobbyPending=await readyState(host);assert.equal(lobbyPending.aiChat.status,'working');assert(responseMessages({conversation:lobbyPending.messages}).some(m=>m.delivery==='pending'&&m.source==='model'));releaseLobby();
     let ready=await until(async()=>{const s=await readyState(guest.cookie);return s.aiChat?.status==='complete'?s:null;});
     assert.equal(ready.game,null);assert.equal(ready.messages[0].playerId,actor);assert.equal(ready.messages[1].source,'model');assert.equal(ready.messages[1].model,'fixture-vision');
     const firstLobbyCall=fixture.calls.filter(c=>c.purpose==='banter').at(-1);assert.equal(firstLobbyCall.authorization,'Bearer '+key);assert(firstLobbyCall.prompt.includes('开局前先打个招呼。'));assert(firstLobbyCall.prompt.includes('现在没有正在进行的题目'));
@@ -106,6 +110,22 @@ test('room @AI uses the host compatible API, records both sides, rejects imperso
     const blind=await state(cookies.get(humanGuessers[0].id)),solved=await state(cookies.get(humanGuessers[1].id));
     assert.equal(blind.answer,null);assert(!JSON.stringify(blind).includes(answer));assert.deepEqual(blind.results[player.id].history,[]);
     assert.equal(solved.answer,answer);assert.equal(solved.results[player.id].history[0].guess,answer);assert.equal(solved.results[humanGuessers[0].id].history[0].guess,'错误词');
+    // Actual HTTP regression: starting guesses must acknowledge while a model is
+    // still held. A human can submit before that model without refreshing.
+    const second={...player,id:'second-ai',name:'另一位 AI',characterId:'claude'};
+    await request('/api/config',{players:[player,second]},host);
+    await request('/api/start',{playerIds:[player.id,second.id],human:true,mode:'battle',category:'动物',wordLevel:'easy',rounds:1,hintMode:'none',banter:false},host,202);
+    const offlineState=async()=>(await request('/api/state',undefined,host)).value.game;
+    let offline=await until(async()=>{const s=await offlineState();return s.phase!=='idle'&&s.phase!=='drawing-ai'?s:null;});
+    while(offline.artistHuman){await request('/api/action',{gameId:offline.id,action:'reveal'},host);await request('/api/action',{gameId:offline.id,action:'next'},host);offline=await until(async()=>{const s=await offlineState();return s.phase==='ready'?s:null;});}
+    const releaseGuess=fixture.hold('guess'),before=fixture.calls.length,offlineStamp={gameId:offline.id,index:offline.index,turn:offline.turn};
+    await Promise.race([request('/api/action',{...offlineStamp,action:'draw-done',image:renderRelayDrawing(offline.shapes)},host),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(new Error('draw-done waited for model instead of acknowledging')),3000);timer.unref();})]);
+    await until(()=>fixture.calls.length>before);assert.equal((await offlineState()).results.human.status,'waiting');
+    await request('/api/action',{...offlineStamp,action:'guess',guess:'先提交的真人答案'},host);
+    offline=await offlineState();assert.equal(offline.phase,'guessing');assert.equal(offline.results.human.status,'confident');
+    await request('/api/action',{...offlineStamp,action:'guess',guess:'重复提交'},host,400);
+    releaseGuess();await until(async()=>['review','reveal'].includes((await offlineState()).phase));
+    offline=await offlineState();assert.equal(offline.results.human.history.length,1);assert.equal(offline.results.human.history[0].guess,'先提交的真人答案');
   }catch(e){e.message+='\n'+errors;throw e;}
   finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}await fixture.close();await rm(directory,{recursive:true,force:true});}
 });

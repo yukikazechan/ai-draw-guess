@@ -152,7 +152,7 @@ test('player guess deadline gives missing humans zero while AI keeps its own req
     const pending=rooms.action(users[0],{gameId:g.id,index:g.index,turn:g.turn,action:'draw-done',shapes:[outline]});
     g.humanGuess('乙的答案',false,'b');g.clock.deadline=Date.now()-1;rooms.expire(room);
     assert.equal(g.phase,'guessing');assert(g.results.c.pending.skipped);assert(g.results.c.pending.timedOut);assert.equal(g.results.ai.pending,undefined);assert.equal(g.results.ai.status,'thinking');assert.equal(g.controller.signal.aborted,false);assert.equal(g.results.b.pending.guess,'乙的答案');assert.equal(g.clock,null);
-    reply({guess:g.word.answer,confidence:100});await pending;g.publishGuesses();
+    reply({guess:g.word.answer,confidence:100});await pending;await new Promise(r=>setImmediate(r));g.publishGuesses();
     assert.equal(g.results.ai.history.length,1);assert(!g.results.ai.history[0].skipped);assert.equal(g.players.find(p=>p.id==='ai').guessScore,3);
     const snapshot=g.snapshot('c');assert.equal(snapshot.results.b.history[0].guess,'乙的答案');assert.equal(g.clock,null);
   }finally{rooms.close();}

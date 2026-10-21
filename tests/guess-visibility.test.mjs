@@ -58,7 +58,7 @@ test('非联机猜错到第三次才揭晓全部答案，已结束题目的记�
 
 test('非联机画手和无真人的 AI 观战仍可看已判分回答',async()=>{
  for(const human of [true,false]){
-  let g;g=new Game({players:[{id:'artist-ai',name:'AI 一'},{id:'hit-ai',name:'AI 二'},{id:'miss-ai',name:'AI 三'}],human,mode:'battle',category:'动物',orderRandom:n=>n-1,revealDelay:0,run:async p=>({guess:p.id==='hit-ai'?g.word.answer:'错误动物',reason:'图形线索'})});
+  let g;g=new Game({players:[{id:'artist-ai',name:'AI 一'},{id:'hit-ai',name:'AI 二'},{id:'miss-ai',name:'AI 三'}],human,mode:'battle',category:'动物',orderRandom:n=>n-1,revealDelay:0,run:async(p,_prompt,image)=>image?{guess:p.id==='hit-ai'?g.word.answer:'错误动物',reason:'图形线索'}:{shapes}});
   try{
    await g.next();await g.beginGuess({shapes,image:renderRelayDrawing(shapes)});assert.equal(g.phase,'review');
    assert.equal(g.snapshot().results['hit-ai'].history[0].guess,g.word.answer);

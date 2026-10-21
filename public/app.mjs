@@ -20,6 +20,8 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let config=null,game=null,mode='battle',human=true,category='成语',idiomLevel='easy',rounds=1,selected=new Set(),localShapes=[],color='#202633',erasing=false,currentStroke=null;
 let canvasKey='',actionKey='',resultKey='',animation=0,animating=false,inFlight=0,autoSent='',toastTimer,polling=false,online=true;
+const pendingGuesses=new Set();
+const guessScope=g=>g?`${g.id}:${g.index}:${g.turn}`:'';
 let modelCatalog=null,actionDraftScope='',hintMode='visual';
 let productionTrace=null,bucket=false,mobileDraftScope='',banterComposerKey='';
 let roomReady=false,roomEntering=false,roomLoading=false,lastRoomId='',roomLobbyKey='',roomStatus='正在连接房间…',roomEntryError='',roomChatBusy=false,roomChatScope='',roomChatReply='',roomChatOptions='';
@@ -255,13 +257,15 @@ $('startButton').onclick=async()=>{
 function resetView(){canvasKey='';actionKey='';resultKey='';autoSent='';localShapes=[];drawingHistory.reset();currentStroke=null;animation++;animating=false;window.scrollTo({top:0,behavior:'instant'});}
 async function act(action,extra={}){
   const id=game?.id;if(!id)return false;
-  if(inFlight&&['guess','pass'].includes(action))return false;
+  const answering=['guess','pass'].includes(action),scope=guessScope(game);
+  if(answering&&pendingGuesses.has(scope))return false;
   const stamp={gameId:id,index:game.index,turn:game.turn};
   if(isRoom()&&!roomClient.connected){toast('房间正在重连，请恢复连接后重试。');return false;}
-  inFlight++;
-  try{await productionTrace?.flush();if(isRoom())await roomClient.action(action,{...stamp,...extra});else await api('/api/action',{gameId:id,action,...extra});await poll();return true;}
+  if(answering)pendingGuesses.add(scope);
+  inFlight++;if(answering){actionKey='';renderAction();updateMobileControls();}
+  try{if(!answering)await productionTrace?.flush();if(isRoom())await roomClient.action(action,{...stamp,...extra});else await api('/api/action',{...stamp,action,...extra});await poll();return true;}
   catch(e){toast(e.message);autoSent='';actionKey='';if(game&&game.phase!=='finished')renderAction();return false;}
-  finally{inFlight--;updateMobileControls();maybeAuto();}
+  finally{inFlight--;if(answering)pendingGuesses.delete(scope);if(game?.id===id){actionKey='';renderAction();}updateMobileControls();maybeAuto();}
 }
 async function poll(){
   if(clientOutdated)return;
@@ -286,7 +290,7 @@ function render(){
   updateArenaLayout(game);
   mobileRoster.update(game);
   const room=isRoom()?roomClient.room:null;
-  conversation.update(room?{...(game||{}),id:game?.id||'room:'+room.id,players:game?.players||[],conversation:[...(game?.conversation||[]),...(room.messages||[])].sort((a,b)=>a.at-b.at)}:game);
+  conversation.update(room?{...(game||{}),id:game?.id||'room:'+room.id,players:game?.players||[],conversation:[...(game?.conversation||[]),...(room.messages||[]),...(room.hostReconnectDeadline?[{id:'host-reconnect:'+room.hostId,kind:'chat',name:'系统',text:'房主暂时离线，保留 30 秒重连时间；逾时自动移交给在线成员。',at:room.hostReconnectDeadline-30000}]:[])].sort((a,b)=>a.at-b.at)}:game);
   const sound=soundEvents.update({game,room,viewerId:myId()});if(sound)gameSound.play(sound);
   renderRoomChat();
   renderBanterComposer();
@@ -358,7 +362,7 @@ function updateMobileControls(){
   const connected=!isRoom()||roomClient.connected;
   $('mobilePhaseStatus').textContent=connected?status:'连接断开，正在重连…';
   const primary=$('mobilePrimary');primary.hidden=!action;primary.textContent=text;primary.dataset.action=action;primary.disabled=inFlight>0||animating||!connected;
-  for(const element of $('mobileGuessForm').elements)element.disabled=inFlight>0||!connected;
+  for(const element of $('mobileGuessForm').elements)element.disabled=pendingGuesses.has(guessScope(g))||!connected;
   const hint=[g.myHint&&'只给你：'+g.myHint,g.hint&&'公开提示：'+g.hint].filter(Boolean).join('\n');
   $('mobileHint').hidden=!hint;$('mobileHintText').textContent=hint;
   $('mobileAction').textContent=g.phase==='reveal'&&g.banterEnabled?'@ 选手 / 互动':g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
@@ -419,7 +423,7 @@ function renderAction(){
   let html='';
   const currentHintMode=g.hintMode||'visual',hintRule=currentHintMode==='preset'?'选择画面区域和观察重点，生成固定提示；画里没有的内容请先补画。':'自由提醒画里的具体内容，或纠正误读；别写词语或成语的释义。';
   if(g.phase==='drawing')html=`<h3>轮到你画了 ✎</h3><p>用画笔表达「${esc(g.answer)}」。其他选手看不到题目。</p>${currentHintMode==='none'?'<p class="hint-rule">本局禁止任何提示，只能通过补画帮助猜题。</p>':g.turn>1?`<p class="hint-rule">${hintRule}</p>${hintControl('公开提示','$public',g.hintChoice,currentHintMode)}<details class="private-hints"><summary>单独提示未猜中的选手</summary>${g.players.filter(p=>g.results[p.id]&&!g.results[p.id].solved).map(p=>hintControl('只给 '+p.name,p.id,g.privateHintChoices?.[p.id],currentHintMode)).join('')}</details>`:''}<button class="primary" data-action="submit">${g.turn>1?'改好了，再猜一轮':'画好了，开始猜'}</button>`;
-  if(g.phase==='drawing-ai')html=`<h3>画手正在${g.turn>1?'改画':'构思'}</h3><p>${esc(g.artistName)} 正在生成第 ${g.turn} 版画面。通常需要十几秒到一分钟。</p><div class="button-row"><button data-action="reveal-confirm">跳过本题</button></div>`;
+  if(g.phase==='drawing-ai')html=`<h3>画手正在${g.turn>1?'改画':'构思'}</h3><p>${esc(g.artistName)} 正在生成第 ${g.turn} 版画面。通常需要十几秒到一分钟。</p>${g.notice?`<p role="status">${esc(g.notice)}</p>`:''}<div class="button-row"><button data-action="reveal-confirm">跳过本题</button></div>`;
   if(g.phase==='ready')html=`<h3>画好了，轮到大家猜</h3><p>第 ${g.turn} / 3 次机会 · 本次猜中得 ${4-g.turn} 分</p><button class="primary" data-action="submit">开始猜画</button>`;
   if(g.phase==='guessing') {
     const humanWaiting=hr&&!hr.solved&&hr.status==='waiting';
@@ -442,7 +446,7 @@ function renderAction(){
     if(g.phase==='review'&&!controlsArtist())html=`<h3>等待画手补画</h3><p>${esc(g.artistName)} 可以参考误读继续补画，再开始下一轮猜词。</p>`;
     if(g.phase==='review'&&!g.artistHuman)html='<h3>AI 即将自动补画</h3><p>AI 会参考本轮误读补画，然后自动开始下一轮猜题。</p>';
     if(g.phase==='reveal')html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${Object.values(g.results).filter(r=>r.solved&&!r.forfeit).length} / ${Object.keys(g.results).length} 位猜中 · 画手本题 +${g.roundGain} 分</p>${roomBanterMarkup(g.banter)}${isHost()?`<button class="primary" data-action="next">${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`:'<p>等待房主进入下一题。</p>'}${recapMarkup(g.recap)}`;
-    if(isSpectator())html=`<h3>本局观战，下局一起画</h3><p>画布和公开消息实时同步。你可以在房间聊天，留在房间即可自动参加下一局。</p>${g.phase==='reveal'?`<p>本题答案：<strong>${esc(g.answer)}</strong></p>`:''}<button class="quiet" data-action="open-banter">打开房间聊天</button>`;
+    if(isSpectator())html=`<h3>本局观战，下局一起画</h3><p>画布和公开消息实时同步。你可以在房间聊天，留在房间即可自动参加下一局。</p>${g.phase==='reveal'?`<p>本题答案：<strong>${esc(g.answer)}</strong></p>${isHost()?'<button class="primary" data-action="next">下一题</button>':''}`:''}<button class="quiet" data-action="open-banter">打开房间聊天</button>`;
   }
   const scope=JSON.stringify([g.id,g.index,g.turn,g.phase]),keepDraft=scope===actionDraftScope;
   const drafts=keepDraft?[...$('actionPanel').querySelectorAll('textarea[data-hint-text],select[data-hint-region],select[data-hint-focus],#guessInput')].map(input=>({id:input.id,recipient:input.closest('[data-hint-recipient]')?.dataset.hintRecipient,field:input.hasAttribute('data-hint-region')?'region':input.hasAttribute('data-hint-focus')?'focus':'text',value:input.value,focused:input===document.activeElement,start:input.selectionStart,end:input.selectionEnd})):[];
@@ -458,7 +462,7 @@ function renderAction(){
   for(const draft of drafts){const input=[...$('actionPanel').querySelectorAll('textarea[data-hint-text],select[data-hint-region],select[data-hint-focus],#guessInput')].find(input=>draft.id?input.id===draft.id:input.closest('[data-hint-recipient]')?.dataset.hintRecipient===draft.recipient&&(input.hasAttribute('data-hint-region')?'region':input.hasAttribute('data-hint-focus')?'focus':'text')===draft.field);if(input){input.value=draft.value;if(draft.focused){input.focus({preventScroll:true});if(input.setSelectionRange)input.setSelectionRange(draft.start,draft.end);}}}
   for(const row of $('actionPanel').querySelectorAll('[data-hint-recipient]')){const preview=row.querySelector('[data-hint-preview]');if(preview){try{preview.textContent=visualHint(readHintChoice(row),localShapes,currentHintMode).text||'不发送提示';}catch(error){preview.textContent=error.message;}}}
   if(recapOpen&&$('actionPanel').querySelector('.round-recap'))$('actionPanel').querySelector('.round-recap').open=true;
-  const form=$('guessForm');if(form)form.onsubmit=e=>{e.preventDefault();const input=$('guessInput'),value=input.value.trim();if(!value)return;form.querySelector('button').disabled=true;act('guess',{guess:value});};
+  const form=$('guessForm');if(form){for(const control of form.elements)control.disabled=pendingGuesses.has(guessScope(g))||isRoom()&&!roomClient.connected;form.onsubmit=e=>{e.preventDefault();const input=$('guessInput'),value=input.value.trim();if(value)act('guess',{guess:value});};}
 }
 function roomBanterMarkup(b){
   if(!b)return '';
