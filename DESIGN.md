@@ -1,5 +1,9 @@
 # Existing visual system
 
+Room recovery controls use the same role-aware state on mobile and desktop: a spectator who becomes host retains next-question/result and drawing-retry actions without becoming a guesser. Returning to preparation preserves the current AI selection unless its owner changed. While reading chat history, a pending response becoming a reply, error or cancellation exposes a new-response cue without moving the reader.
+
+The resource notice is collapsed by default. Failed Live2D loads use a compact name initial and a separate 44px retry target; they do not compete with the game status. At 801–1200px the roster uses two columns for readable captions. Narrow drawer answer forms put the input on its own row, with the primary submit action wider than skip. The mobile workspace reserves the actual measured dock height. Auxiliary setup text uses the shared muted color, and keyboard focus uses a consistent visible outline.
+
 Human answers have a per-question/attempt submission lock independent of long-running AI requests. An AI response gets a named pending row in the existing conversation; the eventual model line uses the same UI identity. Failed or cancelled requests remain explicit, retries return to pending, and human recipients never get fabricated model status. This applies to solo banter, shared room banter and lobby AI chat. AI guess seats distinguish automatic retry from normal processing and show failed submissions as zero points. A room host's reconnect grace appears in the same chat surface.
 
 Answer privacy applies equally to solo and online human guessers: until solved or fully revealed, correct guesses and their reasons are filtered by the server, including redraws. Artists and pure AI spectators can inspect published guesses.

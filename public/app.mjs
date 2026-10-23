@@ -12,7 +12,7 @@ import {relayActionMarkup,relayStageMarkup,renderRelayResults} from './relay-vie
 import {createRelayShowcase} from './relay-view.mjs';
 import {banterMarkup,banterPending,banterComposerMarkup,bindBanterControls,captureBanterDraft,restoreBanterDraft} from './banter-view.mjs';
 import {createRoomClient} from './room-client.mjs';
-import {roomComposerState,roomMessageAction} from './room-composer.mjs';
+import {roomComposerState,roomMessageAction,spectatorProgress} from './room-composer.mjs';
 import {createMobileRoster} from './mobile-roster.mjs';
 import {createSoundEngine,createSoundEvents} from './game-sounds.mjs';
 
@@ -207,7 +207,7 @@ function receiveRoom(next){
   game=next?.game||null;
   if(next&&next.id!==lastRoomId){lastRoomId=next.id;$('useCustomWords').checked=!!config.defaults?.useCustomWords;if(next.hostId===config.user.id&&next.lobby)selected=new Set(next.lobby.playerIds);}
   if(!next)lastRoomId='';
-  if(ownerChanged&&next?.hostId===config.user.id&&next.lobby)selected=new Set(next.lobby.playerIds);
+  if((ownerChanged||changed&&!next?.game)&&next?.hostId===config.user.id&&next.lobby)selected=new Set(next.lobby.playerIds);
   if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();if(changed&&!(ownerChanged&&next.hostId===config.user.id&&game.phase==='finished'))selected=new Set(game.players.filter(p=>!p.human).map(p=>p.id));}
   if(changed)resetView();
   if(!roomEntering){const url=new URL('/',location.origin);url.searchParams.set('mode','online');const code=next?.id||new URL(location.href).searchParams.get('room');if(code)url.searchParams.set('room',code);history.replaceState(null,'',url);}
@@ -358,7 +358,7 @@ function updateMobileControls(){
   else if(g.phase==='reveal'){status='答案：'+g.answer;if(isHost()){action='next';text=g.index+1===g.total?'查看结果':'下一题';}}
   else if(g.phase==='draw-error'){status='AI 作画失败';if(isHost()){action='retry-draw';text='重试作画';}}
   if(g.mode==='relay'){status='大家正在完成这一棒';const task=g.relay.myTask;if(task?.status==='waiting'&&task.input){action=task.kind==='draw'?'relay-draw-submit':'open-action';text=task.kind==='draw'?'画好了，交卷':'填写接龙答案';}}
-  if(isSpectator()){action='';text='';status='本局观战 · 下局自动参赛 · 可聊天';}
+  if(isSpectator())({action,text,status}=spectatorProgress(g,isHost()));
   const connected=!isRoom()||roomClient.connected;
   $('mobilePhaseStatus').textContent=connected?status:'连接断开，正在重连…';
   const primary=$('mobilePrimary');primary.hidden=!action;primary.textContent=text;primary.dataset.action=action;primary.disabled=inFlight>0||animating||!connected;
@@ -446,7 +446,10 @@ function renderAction(){
     if(g.phase==='review'&&!controlsArtist())html=`<h3>等待画手补画</h3><p>${esc(g.artistName)} 可以参考误读继续补画，再开始下一轮猜词。</p>`;
     if(g.phase==='review'&&!g.artistHuman)html='<h3>AI 即将自动补画</h3><p>AI 会参考本轮误读补画，然后自动开始下一轮猜题。</p>';
     if(g.phase==='reveal')html=`<h3>答案揭晓</h3><div class="answer">${esc(g.answer)}</div><p>${Object.values(g.results).filter(r=>r.solved&&!r.forfeit).length} / ${Object.keys(g.results).length} 位猜中 · 画手本题 +${g.roundGain} 分</p>${roomBanterMarkup(g.banter)}${isHost()?`<button class="primary" data-action="next">${g.index+1===g.total?'查看比赛结果':'下一题'}</button>`:'<p>等待房主进入下一题。</p>'}${recapMarkup(g.recap)}`;
-    if(isSpectator())html=`<h3>本局观战，下局一起画</h3><p>画布和公开消息实时同步。你可以在房间聊天，留在房间即可自动参加下一局。</p>${g.phase==='reveal'?`<p>本题答案：<strong>${esc(g.answer)}</strong></p>${isHost()?'<button class="primary" data-action="next">下一题</button>':''}`:''}<button class="quiet" data-action="open-banter">打开房间聊天</button>`;
+    if(isSpectator()){
+      const progress=spectatorProgress(g,isHost());
+      html=`<h3>${isHost()?'你已接任房主，本局继续观战':'本局观战，下局一起画'}</h3><p>${isHost()?'你可以控制比赛进度；本局 AI 配置和额度仍由开局房主提供。':'画布和公开消息实时同步。你可以在房间聊天，留在房间即可自动参加下一局。'}</p>${g.phase==='reveal'?`<p>本题答案：<strong>${esc(g.answer)}</strong></p>`:''}${g.phase==='draw-error'?`<p class="error-message">${esc(g.notice)}</p>`:''}${progress.action?`<button class="primary" data-action="${progress.action}">${progress.text}</button>`:''}${isHost()&&g.phase==='draw-error'?'<button class="quiet" data-action="reveal-confirm">跳过本题</button>':''}<button class="quiet" data-action="open-banter">打开房间聊天</button>`;
+    }
   }
   const scope=JSON.stringify([g.id,g.index,g.turn,g.phase]),keepDraft=scope===actionDraftScope;
   const drafts=keepDraft?[...$('actionPanel').querySelectorAll('textarea[data-hint-text],select[data-hint-region],select[data-hint-focus],#guessInput')].map(input=>({id:input.id,recipient:input.closest('[data-hint-recipient]')?.dataset.hintRecipient,field:input.hasAttribute('data-hint-region')?'region':input.hasAttribute('data-hint-focus')?'focus':'text',value:input.value,focused:input===document.activeElement,start:input.selectionStart,end:input.selectionEnd})):[];

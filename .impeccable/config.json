@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-10-18T12:53:34.497Z",
         "reason": "Agent review: the online page has no radial halo; the detector reads unused legacy game selectors from the shared stylesheet."
+      },
+      {
+        "rule": "gpt-thin-border-wide-shadow",
+        "value": "*",
+        "files": [
+          "public/index.html"
+        ],
+        "createdAt": "2026-10-23T14:33:54.284Z",
+        "reason": "Agent review: all four findings refer to native dialogs settingsDialog, relayPictureDialog, roomDialog and confirmDialog, opened individually as overlays. They are not a row of cards; arena cards use box-shadow:none."
       }
     ]
   }

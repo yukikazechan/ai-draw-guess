@@ -12,7 +12,7 @@ export function messageLabel(message){
   return ({round:'新题目',answer:'揭晓',guess:message.skipped?'跳过':'猜词',hint:message.recipientId?`只对 ${message.recipientName||'你'} 说`:'公开提示',recap:message.source==='model'?'一句话复盘':'记录摘要'})[message.kind]||'消息';
 }
 export function messageBody(message){
-  if(message.source==='model'&&message.delivery)return `<p class="speech-reason${message.delivery==='error'?' error-message':''}" role="status"${message.delivery==='pending'?' aria-live="polite" aria-busy="true"':''}>${esc(message.text)}</p>`;
+  if(message.source==='model'&&message.delivery)return `<p class="speech-reason ai-response-status${message.delivery==='error'?' error-message':''}" role="status"${message.delivery==='pending'?' aria-live="polite" aria-busy="true"':''}>${esc(message.text)}</p>`;
   if(message.kind==='guess')return `<p class="speech-guess">${message.skipped?'这次先跳过。':`我猜：<strong>${esc(message.text)}</strong>`}</p>${message.reason?`<p class="speech-reason">${esc(message.reason)}</p>`:''}${!message.skipped?`<p class="speech-verdict ${message.correct?'right':'wrong'}">${message.correct?`猜中 · +${message.points} 分`:'这次没猜中'}${matchNote(message.match)?`<br>${matchNote(message.match)}`:''}</p>`:''}`;
   let html=`<p>${esc(message.text)}</p>`;
   if(message.kind==='chat'&&['pending','error','cancelled'].includes(message.delivery))html+=`<p class="speech-reason${message.delivery==='error'?' error-message':''}" role="status">${esc(message.deliveryText||'正在等待回应…')}</p>`;
@@ -44,16 +44,22 @@ export function latestSpeech(game,playerId){
   const messages=(game?.conversation||[]).filter(m=>m.index===game.index&&m.playerId===playerId&&['guess','hint','recap','relay-status','banter'].includes(m.kind));
   return messages.findLast(m=>m.kind==='banter')||messages.at(-1)||null;
 }
+export function conversationUpdateNotice(previous,next){
+  const before=new Map(previous.map(m=>[m.id,m]));
+  if(next.some(m=>!before.has(m.id)))return '有新消息 ↓';
+  if(next.some(m=>before.get(m.id)?.delivery==='pending'&&m.delivery!=='pending'))return '有新回应 ↓';
+  return '';
+}
 export function recapMarkup(recap){
   if(!recap)return '';
   return `<details class="round-recap"><summary>心路历程与一句话复盘${recap.status==='loading'?' · 整理中':''}</summary>${recap.entries.map(entry=>`<article><strong>${esc(entry.name)}${entry.artist?' · 画手':''}</strong>${messageBody({kind:'recap',text:entry.status==='pending'?'正在整理一句话复盘…':entry.summary,trail:entry.trail})}${entry.status==='record'?'<small>根据已提交记录整理</small>':''}</article>`).join('')}</details>`;
 }
 export function createConversation(panel){
   const log=panel.querySelector('.chat-log'),filter=panel.querySelector('select'),follow=panel.querySelector('input'),newButton=panel.querySelector('.chat-new'),count=panel.querySelector('.chat-count');
-  let gameId=null,messages=[],key='',filterKey='',nodes=new Map(),rendering=false,userScrolling=false,scrollIntentTimer;
+  let gameId=null,messages=[],visibleBefore=[],key='',filterKey='',nodes=new Map(),rendering=false,userScrolling=false,scrollIntentTimer;
   function render(){
     const nextKey=JSON.stringify(messages);if(nextKey===key&&filterKey===filter.value)return;
-    const oldIds=new Set(nodes.keys()),oldScroll=log.scrollTop,top=log.getBoundingClientRect().top;
+    const oldScroll=log.scrollTop,top=log.getBoundingClientRect().top;
     const anchor=[...log.children].find(node=>node.getBoundingClientRect().bottom>top);
     const anchorId=anchor?.dataset.messageId,anchorTop=anchor?.getBoundingClientRect().top;
     key=nextKey;filterKey=filter.value;rendering=true;
@@ -64,6 +70,7 @@ export function createConversation(panel){
       let node=nodes.get(m.id);
       if(!node){node=document.createElement('article');node.className=`chat-message chat-${m.kind}`;node.dataset.messageId=m.id;node.style.setProperty('--speaker',/^#[0-9a-f]{6}$/i.test(m.color||'')?m.color:'#67738f');nodes.set(m.id,node);}
       const renderKey=JSON.stringify(m);if(node.dataset.renderKey!==renderKey){node.dataset.renderKey=renderKey;
+        if(m.delivery)node.dataset.delivery=m.delivery;else delete node.dataset.delivery;
         node.innerHTML=`<header><span class="chat-round">${m.kind==='chat'?'房间':`第 ${(m.chainIndex??m.index)+1} ${m.chainIndex!=null?'条链':m.mode==='relay'?'棒':'题'}`}${['guess','hint'].includes(m.kind)?` · 第 ${m.turn} 轮`:''}</span><strong>${esc(m.name)}</strong>${m.model?`<small class="chat-model">${esc(m.model)}</small>`:''}<span class="chat-kind">${esc(messageLabel(m))}</span></header>${messageBody(m)}`;
       }
       // Previously private messages may be revealed later: insert them at their original place.
@@ -71,11 +78,11 @@ export function createConversation(panel){
     }
     panel.querySelector('.chat-empty').hidden=visible.length>0;
     count.textContent=`${visible.length} 条`;
-    const added=visible.filter(m=>!oldIds.has(m.id)).length;
+    const notice=conversationUpdateNotice(visibleBefore,visible);visibleBefore=visible;
     if(follow.checked){log.scrollTop=log.scrollHeight;newButton.hidden=true;}else{
       log.scrollTop=oldScroll;
       if(anchorId&&nodes.has(anchorId))log.scrollTop+=nodes.get(anchorId).getBoundingClientRect().top-anchorTop;
-      if(added){newButton.hidden=false;newButton.textContent='有新消息 ↓';}
+      if(notice){newButton.hidden=false;newButton.textContent=notice;}
     }
     rendering=false;
   }
@@ -94,7 +101,7 @@ export function createConversation(panel){
   addEventListener('pagehide',()=>{resize.disconnect();clearTimeout(scrollIntentTimer);},{once:true});
   function update(game){
     panel.hidden=!game;if(!game)return;
-    if(gameId!==game.id){gameId=game.id;nodes.clear();log.replaceChildren();key='';filterKey='';filter.value='all';follow.checked=true;newButton.hidden=true;}
+    if(gameId!==game.id){gameId=game.id;nodes.clear();visibleBefore=[];log.replaceChildren();key='';filterKey='';filter.value='all';follow.checked=true;newButton.hidden=true;}
     messages=responseMessages(game).map(m=>{const p=game.players?.find(p=>p.id===m.playerId);return {...m,model:m.kind==='chat'&&m.source==='model'?m.model||'':p&&!p.human?playerModelLabel(p):''};});render();
   }
   return {update};

@@ -329,8 +329,8 @@ dialog.panel-drawer[data-active-panel=chat]{width:min(1080px,94vw);height:min(78
 
 /* On phones the match is a workspace. Detailed tasks open in the existing drawer. */
 @media(max-width:800px){
-  body.arena-board{height:100dvh;overflow:hidden;--mobile-dock-height:108px}
-  .arena-board .app-shell,.arena-board.room-mode .app-shell{height:100dvh;padding:0 12px var(--mobile-dock-height);display:flex;flex-direction:column;overflow:hidden}
+  body.arena-board{height:100dvh;overflow:hidden}
+  .arena-board .app-shell,.arena-board.room-mode .app-shell{height:100dvh;padding:0 12px var(--mobile-dock-height,108px);display:flex;flex-direction:column;overflow:hidden}
   .arena-board .topbar{flex:none;min-height:46px;margin-bottom:5px}
   .arena-board .app-shell>main{display:flex;flex-direction:column;flex:1;min-height:0}
   .arena-board .mobile-roster{flex:none;margin-bottom:6px}
@@ -378,10 +378,43 @@ dialog.panel-drawer[data-active-panel=chat]{width:min(1080px,94vw);height:min(78
   .mobile-more-panel>button,.mobile-more-panel>a,.mobile-more-panel>details>summary{display:block;width:100%;padding:11px 9px;border:0;background:transparent;font-size:14px;color:#344465;text-align:left;line-height:1.5}
   .mobile-more-panel>button:hover,.mobile-more-panel>a:hover{background:#edf2f8}
   .mobile-more-panel details p{position:static;width:auto;padding:8px;margin:0;border:0;font-size:13px}
-  #mobileHint p{position:fixed;left:12px;right:12px;bottom:calc(var(--mobile-dock-height) + 8px);width:auto;max-height:45dvh;overflow:auto;white-space:pre-wrap}
-  .arena-board .toast{bottom:calc(var(--mobile-dock-height) + 12px);z-index:25}
+  #mobileHint p{position:fixed;left:12px;right:12px;bottom:calc(var(--mobile-dock-height,108px) + 8px);width:auto;max-height:45dvh;overflow:auto;white-space:pre-wrap}
+  .arena-board .toast{bottom:calc(var(--mobile-dock-height,108px) + 12px);z-index:25}
   .arena-board .panel-drawer .action-panel,.arena-board .panel-drawer .match-chat{display:block}
   .arena-board .panel-drawer .action-panel p{font-size:16px}
   .arena-board[data-mobile-phase=finished]{height:auto;overflow:auto}
 }
 @media(max-width:800px) and (max-height:650px){.arena-board .mobile-roster .player-seat{height:96px;min-height:96px}.arena-board .mobile-roster .seat-answers{max-height:18px}.arena-board .mobile-roster .seat-stage{height:42px}.arena-board .mobile-roster .seat-model{display:none}}
+
+/* Keep recovery states readable without crowding the drawing workspace. */
+.intro-text,.row-label,.idiom-level-help,.hint-mode-help{color:var(--muted)}
+.asset-notice{margin:10px clamp(12px,2vw,36px);padding:10px 14px;font-size:13px;line-height:1.6;background:#f7faff;color:#455773;border:1px solid #cfdae8;border-radius:10px}
+.asset-notice summary{cursor:pointer;overflow-wrap:anywhere}
+.asset-notice p{margin:8px 0 0;font-size:13px;max-width:70ch}
+.asset-notice a{text-decoration:underline;text-underline-offset:3px}
+.seat-stage[data-load-state=error]{display:grid;justify-items:center;align-content:center;gap:2px}
+.seat-stage[data-load-state=error] .seat-fallback{display:grid;place-items:center;width:26px;height:26px;border-radius:8px;background:#e7eef8;color:#344465;font-size:20px;font-weight:700;line-height:1}
+.seat-stage[data-load-state=error] .seat-retry{position:static;min-height:44px;min-width:44px;width:auto;max-width:100%;padding:5px 8px;line-height:1.3}
+.arena-board .chat-message{font-size:14px;line-height:1.7}
+.chat-message[data-delivery=pending] .ai-response-status{display:flex;align-items:center;gap:8px;color:#344465}
+.chat-message[data-delivery=pending] .ai-response-status::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:#344fd2}
+.chat-message[data-delivery=error] .ai-response-status{color:#96324c}
+.arena-board :where(button,a,summary,input,select,textarea):focus-visible{outline:2px solid #344fd2;outline-offset:3px}
+.arena-board .action-panel #guessForm>.primary{min-height:44px;padding:10px 16px}
+.arena-board .action-panel #guessForm>.guess-pass{min-height:44px;padding:8px 10px}
+@media(min-width:801px) and (max-width:1200px){
+  .arena-board .guessers{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:800px){
+  .arena-board .mobile-roster .seat-stage[data-load-state=error]{height:72px}
+}
+@media(max-width:560px){
+  .panel-drawer .action-panel #guessForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .panel-drawer .action-panel #guessForm>input{grid-column:1/-1;min-height:44px}
+  .panel-drawer .action-panel #guessForm>button{min-width:0;min-height:44px}
+  .panel-drawer .action-panel #guessForm>.primary{width:100%;justify-self:stretch}
+}
+@media(max-width:800px) and (max-height:650px){
+  .arena-board .mobile-roster .seat-stage[data-load-state=error]{height:44px}
+  .arena-board .mobile-roster .seat-stage[data-load-state=error] .seat-fallback{display:none}
+}

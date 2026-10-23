@@ -38,13 +38,14 @@ export function createPlayerSeats(container,{View=CharacterView,onPreparation=()
     const seat={card,characterId:character?.id,modelUrl:character?.modelUrl,view:null,feedbackKey:'',status:'loading',visible:true};seats.set(player.id,seat);home.append(card);visibility?.observe(card);
     if(character){
       const stage=card.querySelector('.seat-stage');
-      stage.innerHTML='<canvas></canvas><span class="seat-loading" role="status">角色加载中…</span><button class="seat-retry" aria-label="重新加载角色" hidden>重试</button>';
-      const canvas=stage.querySelector('canvas'),loading=stage.querySelector('.seat-loading'),retry=stage.querySelector('button');
+      stage.innerHTML='<canvas></canvas><span class="seat-fallback" aria-hidden="true" hidden></span><span class="seat-loading" role="status">加载中…</span><button class="seat-retry" hidden>重试</button>';
+      const canvas=stage.querySelector('canvas'),loading=stage.querySelector('.seat-loading'),retry=stage.querySelector('button'),fallback=stage.querySelector('.seat-fallback');
+      fallback.textContent=Array.from(player.name||character.name||'AI')[0].toUpperCase();retry.setAttribute('aria-label',`重新加载 ${player.name} 的角色`);retry.title='角色暂未加载，点击重试；游戏可以继续。';
       canvas.setAttribute('aria-label',`${player.name} 的 Live2D 角色`);card.dataset.character=character.id;
       seat.load=()=>{
-        seat.view?.destroy();const next=canvas.cloneNode();stage.querySelector('canvas').replaceWith(next);loading.hidden=false;loading.textContent='角色加载中…';retry.hidden=true;
+        seat.view?.destroy();const next=canvas.cloneNode();next.hidden=false;stage.querySelector('canvas').replaceWith(next);loading.hidden=false;loading.textContent='加载中…';retry.hidden=true;fallback.hidden=true;stage.dataset.loadState='loading';
         seat.status='loading';report();
-        const view=new View(next,{modelUrl:character.modelUrl,motion:character.motion,framing:'portrait',onReady:()=>{if(seat.view!==view||seats.get(player.id)!==seat)return;loading.hidden=true;seat.status='ready';report();},onError:()=>{if(seat.view!==view||seats.get(player.id)!==seat)return;loading.textContent='角色加载失败';retry.hidden=false;seat.status='error';report();}});
+        const view=new View(next,{modelUrl:character.modelUrl,motion:character.motion,framing:'portrait',onReady:()=>{if(seat.view!==view||seats.get(player.id)!==seat)return;loading.hidden=true;stage.dataset.loadState='ready';seat.status='ready';report();},onError:()=>{if(seat.view!==view||seats.get(player.id)!==seat)return;next.hidden=true;loading.hidden=true;fallback.hidden=false;retry.hidden=false;stage.dataset.loadState='error';seat.status='error';report();}});
         seat.view=view;view.setState(card.dataset.state||'idle');view.setPaused(paused);view.setSuspended?.(suspended(seat));view.load();
       };
       retry.onclick=seat.load;seat.load();

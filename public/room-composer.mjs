@@ -32,3 +32,10 @@ export function roomMessageAction(room,viewerId,targetId,text){
   if(target.kind==='ai')return state.preparing?{action:'lobby-ai',extra:{targetId,text}}:{action:'banter-challenge',extra:{banterId:state.banterId,targetId,text}};
   return {action:'chat',extra:{targetId,text}};
 }
+export function spectatorProgress(game,host=false){
+  const status=host?'你已接任房主 · 本局继续观战':'本局观战 · 下局自动参赛 · 可聊天';
+  if(!host)return {action:'',text:'',status};
+  if(game?.phase==='reveal')return {action:'next',text:game.index+1===game.total?'查看结果':'下一题',status};
+  if(game?.phase==='draw-error')return {action:'retry-draw',text:'重试作画',status:'AI 作画失败 · 你可以重试或跳过本题'};
+  return {action:'',text:'',status};
+}
