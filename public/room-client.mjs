@@ -53,13 +53,13 @@ export function createRoomClient({request,onChange=()=>{},onConnection=()=>{},on
   }
   function flushDrawing(){
     clearTimeout(drawTimer);const data=pending;pending=null;
-    const g=room?.game;if(!data||!connected||socket?.readyState!==1||!g||g.phase!=='drawing'||data.gameId!==g.id||data.index!==g.index||data.turn!==g.turn)return;
+    const g=room?.game,relay=g?.mode==='relay'&&g.phase==='relay-work'&&g.relay.myTask?.kind==='draw';if(!data||!connected||socket?.readyState!==1||!g||g.phase!=='drawing'&&!relay||data.gameId!==g.id||data.index!==g.index||data.turn!==g.turn)return;
     const json=JSON.stringify(data);if(json.length>240000){onError('画作过大，请撤销部分笔画后再继续。');return;}
     socket.send(json);lastDraw=Date.now();
   }
   function drawing(shapes){
-    const g=room?.game;if(!active||!connected||g?.phase!=='drawing')return;
-    pending={type:'drawing',gameId:g.id,index:g.index,turn:g.turn,shapes:structuredClone(shapes)};
+    const g=room?.game,relay=g?.mode==='relay'&&g.phase==='relay-work'&&g.relay.myTask?.kind==='draw';if(!active||!connected||g?.phase!=='drawing'&&!relay)return;
+    pending={type:'drawing',gameId:g.id,index:g.index,turn:g.turn,...(relay?{chainId:g.relay.myTask.chainId}:{}),shapes:structuredClone(shapes)};
     clearTimeout(drawTimer);drawTimer=setTimeout(flushDrawing,Math.max(0,90-(Date.now()-lastDraw)));
   }
   function suspend(){active=false;epoch++;closeSocket();}

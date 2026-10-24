@@ -3,6 +3,7 @@ export const CELEBRATION_MS=4500;
 export function characterState(game,player,animating=false,now=Date.now()){
  if(!game||game.phase==='finished'||!player)return 'idle';
  const r=game.results?.[player.id];
+ if(game.mode==='undercover')return player.alive===false?'spectator':['thinking','retrying'].includes(r?.status)?'thinking':'idle';
  const submitted=()=>submittedExpression(r?.confidence,`${game.id}:${game.index}:${game.turn??game.relay?.step}:${player.id}`);
  if(game.mode==='relay'){const status=r?.status;return status==='submitted'?(game.relay.kind==='draw'?'finished':submitted()):['queued','error','skipped'].includes(status)?'idle':game.relay.kind==='draw'?'drawing':'thinking';}
  if(game.artistId===player.id){

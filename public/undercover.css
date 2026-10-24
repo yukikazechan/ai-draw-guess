@@ -1,0 +1,16 @@
+.room-game-picker{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:18px 0;padding:16px 0;border-block:1px solid #cfdae8}
+.room-game-picker label{font-weight:700;font-size:15px}.room-game-picker select{min-height:44px;max-width:100%;font-size:16px;padding:8px 12px}.room-game-picker p{margin:0;color:#58677f;font-size:14px;line-height:1.7;flex-basis:100%}
+.undercover-table{padding:clamp(20px,3vw,40px);border:1px solid #cfdae8;border-radius:14px;background:#fff;min-height:380px;display:flex;flex-direction:column;gap:24px;color:#263e60}
+.undercover-table header>span{font-size:14px;color:#58677f}.undercover-table header>strong{display:block;font-size:clamp(24px,2.2vw,34px);line-height:1.4;margin:10px 0}.undercover-table p{font-size:16px;line-height:1.8;margin:8px 0;overflow-wrap:anywhere}
+.undercover-word{padding:16px 18px;border-radius:10px;background:#edf2fc}.undercover-word summary{cursor:pointer;font-size:16px;font-weight:700;min-height:28px}.undercover-word summary span{font-size:13px;font-weight:400;margin-left:12px;color:#58677f}.undercover-word>strong{display:block;font-size:32px;letter-spacing:3px;margin:16px 0;color:#344fd2}.undercover-word p{font-size:14px;color:#455773}
+.undercover-latest{padding-top:4px}.undercover-latest h3{font-size:14px;color:#58677f;margin:0}.undercover-latest small,.undercover-table footer{font-size:13px;color:#58677f;line-height:1.7}.undercover-table footer{margin-top:auto}
+.undercover-votes summary,.undercover-record summary{min-height:44px;cursor:pointer;padding:10px 0;font-size:15px}.undercover-votes ul,.undercover-record ul{padding-left:20px;line-height:1.8}.undercover-votes li p,.undercover-record li p{font-size:14px;color:#58677f}.undercover-record details{border-bottom:1px solid #cfdae8;padding:4px 0}
+#undercoverDescribe textarea,#undercoverVote select{display:block;width:100%;min-height:44px;margin:8px 0 14px;font:inherit;padding:10px;border:1px solid #bdcbe0;border-radius:8px;resize:vertical;background:#fff;color:#263e60}
+#undercoverDescribe .button-row>.primary{flex:1}#undercoverDescribe .button-row>.quiet{flex:0 0 auto;padding:10px 14px}#undercoverVote>.primary{min-height:44px;width:100%}
+.undercover-mode .canvas-shell,.undercover-mode .toolbar,.undercover-mode .canvas-caption,.undercover-mode #underCanvas,.undercover-mode .playback-speed,.undercover-mode .privacy-note{display:none!important}
+.undercover-mode .player-seat[data-state=spectator]{opacity:.7}.undercover-mode .canvas-column{min-width:0}
+.undercover-mode .drawer-preview{display:none}.undercover-mode .panel-drawer .drawer-body{grid-template-columns:minmax(0,1fr)}
+@media(max-width:800px){
+ .undercover-mode .canvas-column{overflow-y:auto!important;display:block!important}.undercover-table{padding:18px;min-height:0;gap:16px;margin-bottom:12px}.undercover-table header>strong{font-size:23px}.undercover-table p{font-size:15px}.undercover-table footer{font-size:12px}.undercover-word{padding:12px}.undercover-table .undercover-votes{display:none}
+ .room-game-picker{gap:10px}.room-game-picker select{flex:1;min-width:0}.undercover-record{padding-bottom:20px}
+}

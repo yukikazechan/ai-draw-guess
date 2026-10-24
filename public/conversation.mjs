@@ -3,6 +3,8 @@ export const escapeText=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<'
 const esc=escapeText;
 export const matchNote=match=>({'idiom-order':'四个字齐全，顺序不同也算对','idiom-three':'三个字位置正确，也算对'})[match]||'';
 export function messageLabel(message){
+  if(message.kind==='undercover-description')return '本轮描述';
+  if(message.kind==='undercover-result')return '投票结果';
   if(message.delivery&&message.source==='model')return message.delivery==='pending'?'正在回应':message.delivery==='error'?'回应失败':'回应已取消';
   if(message.kind==='chat')return `${message.source==='model'?'AI 回应':message.spectator?'观战发言':'聊天'}${message.targetName?' → '+message.targetName:''}`;
   if(message.kind==='forfeit')return '超时判分';

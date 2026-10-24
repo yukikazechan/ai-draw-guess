@@ -1,5 +1,5 @@
 :root{--muted:#58677f;--shadow:0 5px 22px #0000000d}
-.mode-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}
+.mode-tabs{grid-template-columns:repeat(5,minmax(0,1fr))}
 .mode-tabs button{min-width:0}
 .mode-tabs em{position:static;display:inline-block;margin-top:10px}
 .room-entry{display:grid;grid-template-columns:1.25fr 1fr;gap:48px;padding:36px 8px}

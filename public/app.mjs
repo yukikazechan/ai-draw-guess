@@ -15,12 +15,15 @@ import {createRoomClient} from './room-client.mjs';
 import {roomComposerState,roomMessageAction,spectatorProgress} from './room-composer.mjs';
 import {createMobileRoster} from './mobile-roster.mjs';
 import {createSoundEngine,createSoundEvents} from './game-sounds.mjs';
+import {undercoverStageMarkup,undercoverActionMarkup,renderUndercoverResults} from './undercover-view.mjs';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let config=null,game=null,mode='battle',human=true,category='成语',idiomLevel='easy',rounds=1,selected=new Set(),localShapes=[],color='#202633',erasing=false,currentStroke=null;
 let canvasKey='',actionKey='',resultKey='',animation=0,animating=false,inFlight=0,autoSent='',toastTimer,polling=false,online=true;
 const pendingGuesses=new Set();
+let roomPlayMode='battle';
+const chosenGameMode=()=>mode==='online'?roomPlayMode:mode;
 const guessScope=g=>g?`${g.id}:${g.index}:${g.turn}`:'';
 let modelCatalog=null,actionDraftScope='',hintMode='visual';
 let productionTrace=null,bucket=false,mobileDraftScope='',banterComposerKey='';
@@ -156,15 +159,27 @@ function renderLobby(){
   $('idiomLevels').setAttribute('aria-label',category+'难度');
   $('idiomLevels').innerHTML=levels.map(item=>`<button class="chip ${item.id===idiomLevel?'selected':''}" data-idiom-level="${item.id}" aria-pressed="${item.id===idiomLevel}">${item.name} <small>${item.count.toLocaleString('zh-CN')} 题</small></button>`).join('');
   $('idiomLevelHelp').textContent=level?.description||'';
-  $('hintModeRow').hidden=mode==='relay';
+  const gameplay=chosenGameMode();
+  $('roomGameModeRow').hidden=!roomMode||!room;$('roomGameMode').value=roomPlayMode;$('roomGameMode').disabled=!host||roomLoading;
+  $('roomGameModeHelp').textContent=gameplay==='undercover'?'4–13 人。私发词语、轮流描述、匿名投票。发言限时 45 秒，投票限时 30 秒。':gameplay==='relay'?'每人独立接收词语或画作，全部交卷后传递；结束后一起展开所有链条。':'轮流作画，其他真人与 AI 一起猜。';
+  $('categories').closest('.setup-row').hidden=gameplay==='undercover';$('idiomLevelRow').hidden=gameplay==='undercover';
+  $('roomTimeLimits').hidden=!roomMode||!room||!host||gameplay==='undercover';$('roomCustomWords').hidden=!roomMode||!room||!host||gameplay==='undercover';
+  $('hintModeRow').hidden=gameplay==='relay'||gameplay==='undercover';
   $('hintModes').innerHTML=HINT_MODES.map(item=>`<button class="chip ${item.id===hintMode?'selected':''}" data-hint-mode="${item.id}" aria-pressed="${item.id===hintMode}">${item.label}</button>`).join('');
   $('hintModeHelp').textContent=hintModeInfo(hintMode).description;
-  const count=selected.size+(roomMode?(room?.members.length||0):(human?1:0)),relay=mode==='relay';$('matchInfo').textContent=relay?`${count} 条链 · ${count} 棒 · 每人 ${count} 次接力${!human?' · 观战模式':''}`:`${count} 位选手 · 共 ${count*rounds} 题${!roomMode&&!human?' · 观战模式':''}`;
+  const count=selected.size+(roomMode?(room?.members.length||0):(human?1:0)),relay=gameplay==='relay';$('matchInfo').textContent=gameplay==='undercover'?`${count} 位选手 · ${count>=7?2:1} 名卧底 · 至少 4 人`:relay?`${count} 条链 · ${count} 棒 · 每人 ${count} 次接力${!roomMode&&!human?' · 观战模式':''}`:`${count} 位选手 · 共 ${count*rounds} 题${!roomMode&&!human?' · 观战模式':''}`;
   $('roundOptions').hidden=relay;$('relaySetupNote').hidden=!relay;$('relaySetupNote').textContent=`每人一个起始题目，同时传递。每位 AI 完成 ${count} 棒，共约 ${selected.size*count} 次画猜调用。揭晓后，每链每位 AI 投一次通过票；没通过再投一次最大害群之马。`;
   document.querySelector('.final-setup .row-label').textContent=relay?'接龙配置':'每人画几幅';$('startButton').innerHTML=relay?'开始传画接龙 <span aria-hidden="true">↝</span>':'开始比赛 <span aria-hidden="true">✦</span>';
   document.querySelector('.intro h1').innerHTML=relay?'传一幅<span class="pink">画</span>，<br>歪出一个新<span class="pink">故事</span>。':lobbyIntro.heading;
   document.querySelector('.intro-text').innerHTML=relay?'你画我猜，猜完再画。每个人只看上一棒，<br>等所有链条走完，再一起拆开看。':lobbyIntro.text;
   document.querySelector('.rule-note').innerHTML=relay?'<span class="note-tape"></span><strong>传画接龙小抄</strong><p><b>同时行动</b> · 全员画图 / 全员猜词交替</p><p><b>统一传递</b> · 全部交卷才进入下一棒</p><p><b>随机均衡</b> · 每条链都经过每人一次</p><p><b>最后揭晓</b> · 逐棒播放，全员投票</p>':lobbyIntro.note;
+  if(roomMode&&relay)$('relaySetupNote').textContent=`每人一条私有链，共 ${count} 棒。每位 AI 约调用 ${count} 次，结束后统一揭晓；未交卷按房间限时处理。`;
+  if(gameplay==='undercover'){
+    $('roundOptions').hidden=true;$('relaySetupNote').hidden=false;$('relaySetupNote').textContent='每人只知道自己的词。卧底全部出局则平民获胜，卧底人数达到平民人数则卧底获胜；最多 8 轮。';
+    document.querySelector('.final-setup .row-label').textContent='卧底规则';$('startButton').textContent='开始谁是卧底';
+    document.querySelector('.intro h1').textContent='同一句描述，谁的词不一样？';document.querySelector('.intro-text').textContent='真人与 AI 一起描述、推理和投票。保护自己的词，听出不一样的线索。';
+    document.querySelector('.rule-note').innerHTML='<strong>谁是卧底</strong><p>4–6 人 1 名卧底，7–13 人 2 名</p><p>每轮轮流描述，再匿名投票</p><p>平票复投一次，再平无人出局</p><p>词语和身份在结束后统一公布</p>';
+  }
   $('assetSetupNotice').hidden=!!(config.avatarAssets?.core&&config.avatarAssets?.models);
   $('mobileAssetHelp').hidden=$('assetSetupNotice').hidden;
   $('connectionInfo').textContent=config.players.some(p=>p.hasKey)?'当前使用你自己的 AI 配置；修改后下一场比赛生效。':'在「AI 设置」配置自己的 Key，服务端加密保存，换设备登录后继续使用。';
@@ -179,11 +194,12 @@ function renderLobby(){
 }
 function publishRoomSelection(){
   const room=roomClient.room;if(!isRoom()||!room||!isHost()||game&&game.phase!=='finished')return;
-  const playerIds=config.players.filter(p=>selected.has(p.id)).map(p=>p.id),key=JSON.stringify([room.id,playerIds,config.players]);
+  const playerIds=config.players.filter(p=>selected.has(p.id)).map(p=>p.id),key=JSON.stringify([room.id,playerIds,config.players,roomPlayMode]);
   if(key===roomSelectionKey)return;roomSelectionKey=key;clearTimeout(roomSelectionTimer);
-  roomSelectionTimer=setTimeout(async()=>{if(!isRoom()||roomClient.room?.id!==room.id||!isHost()||game&&game.phase!=='finished')return;try{await roomClient.lobby({playerIds});}catch(error){if(roomClient.room?.id===room.id&&isHost()&&(!game||game.phase==='finished')&&roomSelectionKey===key){roomSelectionKey='';toast(error.message);}}},150);
+  roomSelectionTimer=setTimeout(async()=>{if(!isRoom()||roomClient.room?.id!==room.id||!isHost()||game&&game.phase!=='finished')return;try{await roomClient.lobby({playerIds,mode:roomPlayMode});}catch(error){if(roomClient.room?.id===room.id&&isHost()){roomSelectionKey='';toast(error.message);}}},150);
 }
 $('players').onclick=e=>{const h=e.target.closest('[data-human]'),p=e.target.closest('[data-player]');if(h){if(mode==='duel')return toast('单人模式需要你参加。');human=!human;}if(p){const id=p.dataset.player;if(mode==='duel')selected=new Set([id]);else selected.has(id)?selected.delete(id):selected.add(id);}renderLobby();};
+$('roomGameMode').onchange=()=>{roomPlayMode=$('roomGameMode').value;renderLobby();};
 $('categories').onclick=e=>{const b=e.target.closest('[data-category]');if(b){category=b.dataset.category;renderLobby();}};
 $('idiomLevels').onclick=e=>{const b=e.target.closest('[data-idiom-level]');if(b){idiomLevel=b.dataset.idiomLevel;renderLobby();$('idiomLevels').querySelector(`[data-idiom-level="${idiomLevel}"]`).focus();}};
 $('hintModes').onclick=e=>{const b=e.target.closest('[data-hint-mode]');if(!b)return;hintMode=b.dataset.hintMode;try{localStorage.setItem('drawguess.hintMode',hintMode);}catch{}renderLobby();$('hintModes').querySelector('[data-hint-mode="'+hintMode+'"]').focus();};
@@ -203,6 +219,7 @@ function receiveRoom(next){
   if(!next&&$('roomDialog').open)$('roomDialog').close();
   const changed=game?.id!==next?.game?.id;
   const ownerChanged=lastRoomHostId!==(next?.hostId||'');
+  if(next&&(next.id!==lastRoomId||ownerChanged||next.hostId!==config.user.id))roomPlayMode=next.mode||'battle';
   if(ownerChanged){lastRoomHostId=next?.hostId||'';roomSelectionKey='';clearTimeout(roomSelectionTimer);}
   game=next?.game||null;
   if(next&&next.id!==lastRoomId){lastRoomId=next.id;$('useCustomWords').checked=!!config.defaults?.useCustomWords;if(next.hostId===config.user.id&&next.lobby)selected=new Set(next.lobby.playerIds);}
@@ -211,7 +228,7 @@ function receiveRoom(next){
   if(game){game.viewerId=config.user.id;game.clockReceivedAt=Date.now();if(changed&&!(ownerChanged&&next.hostId===config.user.id&&game.phase==='finished'))selected=new Set(game.players.filter(p=>!p.human).map(p=>p.id));}
   if(changed)resetView();
   if(!roomEntering){const url=new URL('/',location.origin);url.searchParams.set('mode','online');const code=next?.id||new URL(location.href).searchParams.get('room');if(code)url.searchParams.set('room',code);history.replaceState(null,'',url);}
-  const lobbyKey=JSON.stringify([next?.id,next?.hostId,next?.members,next?.lobby,game?.id,game?.phase==='finished',roomLoading,roomReady]);
+  const lobbyKey=JSON.stringify([next?.id,next?.hostId,next?.mode,next?.members,next?.lobby,game?.id,game?.phase==='finished',roomLoading,roomReady]);
   if(lobbyKey!==roomLobbyKey){roomLobbyKey=lobbyKey;renderLobby();}
   render();
 }
@@ -247,12 +264,13 @@ $('startButton').onclick=async()=>{
   if(mode!=='relay'&&!config.hintModes?.some(item=>item.id===hintMode))return toast('提示方式尚未在服务端生效，请先关闭并重新启动游戏，再刷新页面。');
   const count=selected.size+(isRoom()?(roomClient.room?.members.length||0):(human?1:0));
   if(isRoom()&&(!roomClient.room||!isHost()))return toast('等待房主开始比赛。');
+  if(chosenGameMode()==='undercover'&&count<4)return toast('谁是卧底至少需要 4 位选手，可以邀请朋友或选择 AI。');
   if(count<2||!isRoom()&&!selected.size)return toast(isRoom()?'至少需要两位选手，可以邀请朋友或选择 AI。':'请至少选择一位 AI，并确保共有两位选手。');
   if(count>13||selected.size>12)return toast('真人和 AI 合计最多 13 位，AI 最多 12 位，请减少选手。');
   const missing=config.players.filter(p=>selected.has(p.id)&&p.provider!=='codex'&&p.provider!=='compatible'&&!p.hasKey);
   if(missing.length){toast(`${missing.map(p=>p.name).join('、')} 尚未填写 API Key。`);openSettings();return;}
   $('startButton').disabled=true;
-  try{const options={playerIds:[...selected],human,mode,category,idiomLevel,wordLevel:idiomLevel,hintMode,banter:$('banterEnabled').checked,rounds:mode==='relay'?1:rounds};if(isRoom())await roomClient.start({...options,useCustomWords:$('useCustomWords').checked,drawSeconds:Number($('drawSeconds').value),guessSeconds:Number($('guessSeconds').value)});else await api('/api/start',options);resetView();await poll();}catch(e){toast(e.message);}finally{$('startButton').disabled=false;}
+  try{const gameplay=chosenGameMode(),options={playerIds:[...selected],human,mode:gameplay,category,idiomLevel,wordLevel:idiomLevel,hintMode,banter:$('banterEnabled').checked,rounds:['relay','undercover'].includes(gameplay)?1:rounds};if(isRoom())await roomClient.start({...options,useCustomWords:gameplay!=='undercover'&&$('useCustomWords').checked,drawSeconds:Number($('drawSeconds').value),guessSeconds:Number($('guessSeconds').value)});else await api('/api/start',options);resetView();await poll();}catch(e){toast(e.message);}finally{$('startButton').disabled=false;}
 };
 function resetView(){canvasKey='';actionKey='';resultKey='';autoSent='';localShapes=[];drawingHistory.reset();currentStroke=null;animation++;animating=false;window.scrollTo({top:0,behavior:'instant'});}
 async function act(action,extra={}){
@@ -271,9 +289,10 @@ async function poll(){
   if(clientOutdated)return;
   if(isRoom()){if(roomReady&&!roomEntering)await roomClient.refresh().catch(e=>toast(e.message));return;}
   if(polling)return;polling=true;
-  try{const data=await api('/api/state');online=true;if(data.game?.mode==='relay'&&game?.id!==data.game.id){mode='relay';human=data.game.players.some(p=>p.human);selected=new Set(data.game.players.filter(p=>!p.human).map(p=>p.id));category=data.game.category;idiomLevel=data.game.wordLevel||data.game.idiomLevel||idiomLevel;renderLobby();}game=data.game;render();}catch(e){if(online)toast(e.message);online=false;}finally{polling=false;}
+  try{const data=await api('/api/state');online=true;if(['relay','undercover'].includes(data.game?.mode)&&game?.id!==data.game.id){mode=data.game.mode;human=data.game.players.some(p=>p.human);selected=new Set(data.game.players.filter(p=>!p.human).map(p=>p.id));if(mode==='relay'){category=data.game.category;idiomLevel=data.game.wordLevel||data.game.idiomLevel||idiomLevel;}renderLobby();}game=data.game;if(game)game.clockReceivedAt=Date.now();render();}catch(e){if(online)toast(e.message);online=false;}finally{polling=false;}
 }
 function render(){
+  document.body.classList.toggle('undercover-mode',game?.mode==='undercover');$('undercoverStage').hidden=game?.mode!=='undercover'||game.phase==='finished';
   if(isRoom()&&game?.phase==='guessing'&&animating){animation++;animating=false;localShapes=structuredClone(game.shapes);paint(canvas,localShapes);$('playbackControls').hidden=true;}
   const activeRoom=isRoom()&&!!roomClient.room&&!!game&&game.phase!=='finished';
   $('mobileRoomBadge').hidden=!activeRoom;$('mobileRoomBadge').textContent=activeRoom?(roomClient.connected?`成员 ${roomClient.room.members.length} · 邀请`:'正在重连'):'';$('mobileRoomBadge').title=activeRoom?'房间码 '+roomClient.room.id:'';
@@ -284,7 +303,7 @@ function render(){
   recordingStatus.hidden=!game?.recordingEnabled;syncAudioButton.hidden=!game?.recordingEnabled||game.phase==='finished';recordingStatus.textContent=game?.recordingWarning||'视频素材自动记录中';
   document.body.classList.toggle('relay-showing',!!game?.relay?.showcase&&game.relay.showcase.status!=='complete');
   $('lobby').hidden=!!game;$('game').hidden=!game||game.phase==='finished';$('results').hidden=!game||game.phase!=='finished';
-  const relay=game?.mode==='relay';$('game').classList.toggle('relay-arena',relay);$('relayStageBar').hidden=!relay||game?.phase==='finished';$('autoContinue').closest('label').hidden=relay||isRoom();document.querySelector('.playback-speed').hidden=relay;
+  const relay=game?.mode==='relay';$('game').classList.toggle('relay-arena',relay);$('relayStageBar').hidden=!relay||game?.phase==='finished';$('autoContinue').closest('label').hidden=relay||game?.mode==='undercover'||isRoom();document.querySelector('.playback-speed').hidden=relay;
   playerSeats.update(game,animating);
   panelDrawer.update(game,{chatAvailable:isRoom()&&!!roomClient.room});
   updateArenaLayout(game);
@@ -295,7 +314,7 @@ function render(){
   renderRoomChat();
   renderBanterComposer();
   if(!game||game.phase!=='finished')relayShowcase.stop();
-  if(!game)return;if(game.phase==='finished'){renderResults();recordingLinks();return;}if(relay){renderRelay();return;}const g=game;
+  if(!game)return;if(game.phase==='finished'){renderResults();recordingLinks();return;}if(relay){renderRelay();return;}if(game.mode==='undercover'){renderUndercover();return;}const g=game;
   $('roundLabel').textContent=`第 ${g.index+1} / ${g.total} 题 · 画手：${g.artistName||'准备中'} · ${g.category}${(g.wordLevelName||g.idiomLevelName)?' / '+(g.wordLevelName||g.idiomLevelName):''} · ${g.length} 个字 · ${hintModeInfo(g.hintMode).name}`;
   $('wordLabel').textContent=g.answer||'？'.repeat(Math.min(g.length||4,10));
   const key=isRoom()&&myArtist()&&g.phase==='drawing'?`${g.id}-${g.index}-drawing-${g.turn}`:`${g.id}-${g.index}-${g.revision}`;
@@ -327,18 +346,18 @@ function renderRoomChat(){
   $('roomChatInput').maxLength=target?.kind==='ai'||reply?120:200;
   $('roomChatInput').placeholder=reply?`回复 @${state.reply.fromName}`:target?.id?`对 @${target.name} 说点什么…`:'说点什么，也可以 @ 真人或 AI';
   $('roomChatStatus').textContent=state.hint;$('roomChatRetry').hidden=!state.retry;
-  for(const control of roomChatComposer.elements)control.disabled=roomChatBusy||!roomClient.connected;
-  roomChatComposer.querySelector('[type="submit"]').disabled=roomChatBusy||!roomClient.connected||!!target?.disabled;
+  for(const control of roomChatComposer.elements)control.disabled=roomChatBusy||!roomClient.connected||!!state.blocked;
+  roomChatComposer.querySelector('[type="submit"]').disabled=roomChatBusy||!roomClient.connected||!!state.blocked||!!target?.disabled;
   // Reapply unavailable AI options after the form's connection state changes.
   for(const option of select.options)option.disabled=!!state.targets.find(p=>p.id===option.value)?.disabled;
 }
 function banterEntry(){return game?.banterEnabled&&game?.players.some(p=>p.id===myId()&&p.human)?'<button class="quiet" data-action="open-banter">@ 选手发起互怼</button>':'';}
 function updateCountdown(){
   if(clientOutdated)return;
-  const sound=soundEvents.countdown(isRoom()?game:null,myId());if(sound)gameSound.play(sound);
-  const timer=$('roundTimer'),clock=game?.clock,active=isRoom()&&clock&&game.phase!=='finished';timer.hidden=!active;if(!active)return;
+  const sound=soundEvents.countdown(isRoom()||game?.mode==='undercover'?game:null,myId());if(sound)gameSound.play(sound);
+  const timer=$('roundTimer'),clock=game?.clock,active=(isRoom()||game?.mode==='undercover')&&clock&&game.phase!=='finished';timer.hidden=!active;if(!active)return;
   const offset=clock.serverNow-(game.clockReceivedAt||Date.now());
-  const seconds=Math.max(0,Math.ceil((clock.deadline-Date.now()-offset)/1000)),label=`${({draw:'作画',guess:'猜词',revise:'自动补画',ready:'开始猜题'})[clock.stage]||'倒计时'} ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
+  const seconds=Math.max(0,Math.ceil((clock.deadline-Date.now()-offset)/1000)),label=`${({draw:'作画',guess:'猜词',revise:'自动补画',ready:'开始猜题','relay-draw':'接龙画图','relay-guess':'接龙猜词',speak:'发言',vote:'投票','next-round':'下一轮'})[clock.stage]||'倒计时'} ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
   if(timer.textContent!==label)timer.textContent=label;timer.classList.toggle('urgent',seconds<=10);
 }
 function updateMobileControls(){
@@ -359,13 +378,28 @@ function updateMobileControls(){
   else if(g.phase==='draw-error'){status='AI 作画失败';if(isHost()){action='retry-draw';text='重试作画';}}
   if(g.mode==='relay'){status='大家正在完成这一棒';const task=g.relay.myTask;if(task?.status==='waiting'&&task.input){action=task.kind==='draw'?'relay-draw-submit':'open-action';text=task.kind==='draw'?'画好了，交卷':'填写接龙答案';}}
   if(isSpectator())({action,text,status}=spectatorProgress(g,isHost()));
+  if(g.mode==='undercover'){const u=g.undercover;status=g.phase==='undercover-speak'?`${g.players.find(p=>p.id===u.speakerId)?.name||'选手'} 正在描述`:g.phase==='undercover-vote'?'本轮匿名投票':'即将进入下一轮';action=own&&g.players.find(p=>p.id===myId())?.alive?'open-action':'';text=g.phase==='undercover-vote'?'查看投票':'查看发言';}
   const connected=!isRoom()||roomClient.connected;
   $('mobilePhaseStatus').textContent=connected?status:'连接断开，正在重连…';
   const primary=$('mobilePrimary');primary.hidden=!action;primary.textContent=text;primary.dataset.action=action;primary.disabled=inFlight>0||animating||!connected;
   for(const element of $('mobileGuessForm').elements)element.disabled=pendingGuesses.has(guessScope(g))||!connected;
   const hint=[g.myHint&&'只给你：'+g.myHint,g.hint&&'公开提示：'+g.hint].filter(Boolean).join('\n');
   $('mobileHint').hidden=!hint;$('mobileHintText').textContent=hint;
-  $('mobileAction').textContent=g.phase==='reveal'&&g.banterEnabled?'@ 选手 / 互动':g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
+  $('mobileAction').textContent=g.mode==='undercover'?'发言 / 投票':g.phase==='reveal'&&g.banterEnabled?'@ 选手 / 互动':g.phase==='drawing'&&canDraw()&&g.turn>1?'添加提示':'提示与操作';
+}
+function renderUndercover(){
+  const g=game,key=`${g.id}:${g.updated}`;if(canvasKey!==key){const open=canvasKey.startsWith(g.id+':')&&$('undercoverStage').querySelector('.undercover-word')?.open;canvasKey=key;$('undercoverStage').innerHTML=undercoverStageMarkup(g);const word=$('undercoverStage').querySelector('.undercover-word');if(word&&open)word.open=true;}
+  $('roundLabel').textContent=`谁是卧底 · 第 ${g.undercover.round} / 8 轮 · ${g.undercover.aliveCount} 人在场`;$('wordLabel').textContent='听出不一样的词';
+  $('toolbar').hidden=true;$('playbackControls').hidden=true;$('canvasStatus').hidden=true;$('guessProgress').textContent=`${g.undercover.aliveCount} / ${g.players.length} 人在场`;
+  renderUndercoverAction();
+}
+function renderUndercoverAction(){
+  const g=game,scope=`${g.id}:${g.index}:${g.turn}`,key=JSON.stringify([scope,g.phase,g.undercover.myVote,isRoom()&&roomClient.connected]);if(actionKey===key)return;actionKey=key;
+  const old=$('undercoverText'),draft=actionDraftScope===scope?old?.value||'':'',focused=old===document.activeElement;actionDraftScope=scope;
+  $('actionPanel').innerHTML=undercoverActionMarkup(g);const input=$('undercoverText');if(input){input.value=draft;if(focused)input.focus();}
+  const describe=$('undercoverDescribe');if(describe)describe.onsubmit=async e=>{e.preventDefault();const text=$('undercoverText').value.trim();if(text){describe.querySelector('button').disabled=true;await act('undercover-describe',{text});}};
+  const vote=$('undercoverVote');if(vote)vote.onsubmit=async e=>{e.preventDefault();const target=$('undercoverTarget').value;if(target){vote.querySelector('button').disabled=true;await act('undercover-vote',{targetId:target==='__abstain__'?null:target});}};
+  if(isRoom()&&!roomClient.connected)for(const control of $('actionPanel').querySelectorAll('button,textarea,select'))control.disabled=true;
 }
 function renderRelay(){
   const g=game,task=g.relay.myTask,drawable=canDraw();
@@ -373,7 +407,7 @@ function renderRelay(){
   $('wordLabel').textContent=task?.input?(task.kind==='draw'?task.input.text:'这幅画，像什么？'):g.relay.kind==='draw'?'所有人一起画图':'所有人一起猜词';
   $('relayStageBar').innerHTML=relayStageMarkup(g);
   const key=`relay-${g.id}-${g.index}-${task?.chainId||'spectator'}`;
-  if(canvasKey!==key){canvasKey=key;localShapes=structuredClone(task?.kind==='guess'?task.input?.shapes||[]:task?.submitted?.shapes||[]);drawingHistory.reset();currentStroke=null;animation++;animating=false;paint(canvas,localShapes);if(drawable)productionTrace?.sync(localShapes);window.scrollTo({top:0,behavior:'instant'});}
+  if(canvasKey!==key){canvasKey=key;localShapes=structuredClone(task?.kind==='guess'?task.input?.shapes||[]:task?.submitted?.shapes||task?.draft||[]);drawingHistory.reset();currentStroke=null;animation++;animating=false;paint(canvas,localShapes);if(drawable)productionTrace?.sync(localShapes);window.scrollTo({top:0,behavior:'instant'});}
   $('playbackControls').hidden=true;$('toolbar').hidden=!drawable;canvas.parentElement.classList.toggle('drawable',drawable);
   $('canvasCaption').textContent=task?.kind==='guess'&&task.input?`${task.fromName||'上一位'} 传来的画`:task?.kind==='draw'?'你的独立画布 · 只有交卷后才会传出去':'';
   const status=$('canvasStatus');status.hidden=!!task?.input;
@@ -387,6 +421,7 @@ function renderRelayAction(){
   const g=game,task=g.relay.myTask,key=JSON.stringify(['relay',g.id,g.index,g.phase,task?.status,Object.values(g.results).filter(r=>r.status==='error').length]);if(actionKey===key)return;actionKey=key;
   const previous=$('relayGuessInput'),draft=previous?.value||'',focused=previous&&document.activeElement===previous;
   $('actionPanel').innerHTML=relayActionMarkup(g);
+  if(isRoom()&&!isHost())for(const button of $('actionPanel').querySelectorAll('[data-action="relay-retry"],[data-action="relay-skip-errors"]'))button.hidden=true;
   const form=$('relayGuessForm');if(form){const input=$('relayGuessInput');input.value=draft;if(focused)input.focus();form.onsubmit=e=>{e.preventDefault();const guess=input.value.trim();if(!guess)return;form.querySelector('button').disabled=true;act('relay-submit',{stage:g.index,chainId:task.chainId,guess});};}
 }
 async function animateDrawing(shapes,previous=[]){
@@ -417,6 +452,7 @@ function readHintChoice(row){const text=row.querySelector('[data-hint-text]');if
 $('actionPanel').addEventListener('change',e=>{const row=e.target.closest('[data-hint-recipient]'),preview=row?.querySelector('[data-hint-preview]');if(!preview)return;try{preview.textContent=visualHint(readHintChoice(row),localShapes,game.hintMode).text||'不发送提示';}catch(error){preview.textContent=error.message;}});
 function submitCanvas(){if(currentStroke||inFlight||animating)return;const shapes=localShapes;if(!shapes.length)return toast('先在画布上画几笔。');const hints={};let hint=null;try{for(const row of document.querySelectorAll('[data-hint-recipient]')){const choice=readHintChoice(row);visualHint(choice,shapes,game.hintMode);if(row.dataset.hintRecipient==='$public')hint=choice;else hints[row.dataset.hintRecipient]=choice;}}catch(e){return toast(e.message);}act('draw-done',{image:png(shapes),shapes,hint,hints});}
 function renderAction(){
+  if(game?.mode==='undercover'){renderUndercoverAction();return;}
   if(game?.mode==='relay'){renderRelayAction();return;}
   const g=game,hr=g.results[myId()],errors=Object.values(g.results).filter(r=>r.status==='error');
   const key=JSON.stringify([g.index,g.phase,g.turn,hr?.status,g.notice,errors.length,g.recap,g.hintMode,g.banter,isHost(),roomClient.connected]);if(key===actionKey)return;actionKey=key;
@@ -478,6 +514,7 @@ function roomBanterMarkup(b){
   return node.innerHTML+banterEntry();
 }
 $('actionPanel').onclick=async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
+  if(a==='undercover-pass'){await act('undercover-describe',{pass:true});return;}
   if(game?.mode==='relay'){
     const g=game,task=g.relay.myTask,extra={stage:g.index,chainId:task?.chainId};
     if(a==='relay-draw-submit'){if(currentStroke||inFlight)return;if(!localShapes.length)return toast('先在画布上画几笔。');b.disabled=true;await act('relay-submit',{...extra,shapes:localShapes});}
@@ -518,8 +555,9 @@ const endStroke=()=>{if(currentStroke)productionTrace?.edit(localShapes,'stroke'
 
 function pct(a,b){return b?`${Math.round(a/b*100)}%`:'—';}
 function renderResults(){
+  if(game.mode==='undercover'){const key=`undercover:${game.id}:${game.updated}:${isHost()}:${roomClient.connected}`;if(resultKey!==key){resultKey=key;renderUndercoverResults($('results'),game,act,{host:isHost(),room:isRoom(),connected:!isRoom()||roomClient.connected});}return;}
   if(game.mode==='relay'&&relayShowcase.update(game))return;
-  if(game.mode==='relay'){const key=`relay-${game.id}-${game.updated}`;if(resultKey!==key){resultKey=key;renderRelayResults($('results'),game,act);window.scrollTo({top:0,behavior:'instant'});}return;}
+  if(game.mode==='relay'){const key=`relay-${game.id}-${game.updated}-${isHost()}-${roomClient.connected}`;if(resultKey!==key){resultKey=key;renderRelayResults($('results'),game,act);if(isRoom()){const home=$('relayHomeButton'),download=$('results').querySelector('.download-link');home.disabled=!isHost()||!roomClient.connected;home.textContent=isHost()?'准备下一局':'等待房主准备下一局';download.href='/api/export?id='+encodeURIComponent(game.id);download.hidden=isSpectator();}window.scrollTo({top:0,behavior:'instant'});}return;}
   $('results').onclick=null;
   const g=game,key=JSON.stringify([g.id,g.history.length,g.updated,isHost(),g.viewerRole,isRoom()&&roomClient.connected]);if(resultKey===key)return;resultKey=key;
   const ranking=[...g.players].sort((a,b)=>b.total-a.total);

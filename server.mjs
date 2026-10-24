@@ -10,6 +10,7 @@ import {resolveCodexPath} from './lib/codex-runtime.mjs';
 import {redactSecrets} from './lib/ai-config-store.mjs';
 import {Game} from './lib/game.mjs';
 import {RelayGame} from './lib/relay.mjs';
+import {UndercoverGame} from './lib/undercover.mjs';
 import {CATEGORIES,IDIOM_LEVELS,CATEGORY_LEVELS} from './lib/words.mjs';
 import {callModel,detectCodex,DEFAULT_PLAYERS,PRESETS,publicPlayer,buildRequest,migrateConfig,getKey} from './lib/providers.mjs';
 import {CHARACTERS,CHARACTER_MAP,characterPrompt,resolveCharacter} from './public/characters.mjs';
@@ -60,6 +61,7 @@ const types={html:'text/html; charset=utf-8',mjs:'text/javascript; charset=utf-8
 // Only explicitly published runtime assets are served; never follow symlinks or expose .local/source files.
 async function registerAssets(dir){for(const item of await readdir(join(ROOT,'public',dir),{withFileTypes:true})){const file=dir+'/'+item.name;if(item.isDirectory())await registerAssets(file);else if(item.isFile()&&types[item.name.split('.').pop()])allowedFiles.set('/'+file,file);}}
 await registerAssets('vendor');await registerAssets('models');await registerAssets('fonts');
+allowedFiles.set('/undercover-view.mjs','undercover-view.mjs');allowedFiles.set('/undercover.css','undercover.css');
 const frontendFiles=[...new Set(allowedFiles.values())].filter(file=>!file.includes('/')&&/\.(mjs|css|html)$/.test(file)).sort();
 const frontendSources=await Promise.all(frontendFiles.map(file=>readFile(join(ROOT,'public',file)).catch(error=>{if(error.code==='ENOENT')return Buffer.alloc(0);throw error;})));
 const frontendHash=createHash('sha256');frontendFiles.forEach((file,index)=>frontendHash.update(file).update(frontendSources[index]));clientVersion=frontendHash.digest('hex').slice(0,12);
@@ -184,11 +186,11 @@ const server=http.createServer(async(req,res)=>{
       if(!CATEGORIES.some(c=>c.name===data.category))throw new Error('请选择题目分类。');
       if(players.some(p=>p.provider==='codex'))codex=await detectCodex();
       if(players.some(p=>p.provider==='codex')&&!codex.available)throw new Error('本机未找到 Codex，请配置 API 选手。');
-      if(!['duel','battle','relay'].includes(data.mode))throw new Error('游戏模式无效。');
+      if(!['duel','battle','relay','undercover'].includes(data.mode))throw new Error('游戏模式无效。');
       if(data.banter!==undefined&&typeof data.banter!=='boolean')throw new Error('互怼开关无效。');
       const options={players:structuredClone(players),human:data.human!==false,rounds:data.rounds,category:data.category,idiomLevel:data.idiomLevel,wordLevel:data.wordLevel??data.idiomLevel??'easy',hintMode:normalizeHintMode(data.hintMode),mode:data.mode,banter:data.banter!==false};
       const context={category:options.category};
-      const game=data.mode==='relay'?new RelayGame({...options,run:online.userRun(req.user,runRelay,context)}):new Game({...options,run:online.userRun(req.user,run,context)});
+      const game=data.mode==='relay'?new RelayGame({...options,run:online.userRun(req.user,runRelay,context)}):data.mode==='undercover'?new UndercoverGame({...options,run:online.userRun(req.user,run,context),speechSeconds:data.speechSeconds??45,voteSeconds:data.voteSeconds??30}):new Game({...options,run:online.userRun(req.user,run,context)});
       context.matchId=game.id;
       online.accounts.charge(req.user.id,'matches');online.accounts.own(game.id,req.user.id);
       s.game?.finish();s.game=game;recordings.attach(game,{secrets:game.players.map(getKey)});launch(game,()=>game.next());return json(res,{ok:true,id:game.id},202);
@@ -196,6 +198,14 @@ const server=http.createServer(async(req,res)=>{
     if(path==='/api/action') {
       const g=s.game;if(!g||g.id!==data.gameId)throw new Error('比赛已变更，请刷新页面。');
       if(data.index!==undefined&&data.index!==g.index||data.turn!==undefined&&data.turn!==g.turn)throw new Error('题目已更新，请重试。');
+      if(g.mode==='undercover'){
+        if(data.action==='undercover-describe')g.describe('human',data.text,data.pass===true);
+        else if(data.action==='undercover-vote')g.vote('human',data.targetId);
+        else if(data.action==='finish')g.finish();
+        else if(data.action==='home'&&g.phase==='finished')s.game=null;
+        else throw new Error('当前卧底阶段不支持此操作。');
+        return json(res,{ok:true});
+      }
       if(data.action==='banter-challenge'){g.challengePlayer(data);return json(res,{ok:true});}
       if(['banter-reply','banter-retry','banter-skip'].includes(data.action)){
         const b=g.mode==='relay'&&g.showcase?.status==='result'?g.showcase.banter:g.phase==='reveal'?g.banter:null;

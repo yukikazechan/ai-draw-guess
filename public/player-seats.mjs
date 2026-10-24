@@ -84,7 +84,7 @@ export function createPlayerSeats(container,{View=CharacterView,onPreparation=()
       card.querySelector('.seat-model').textContent=playerModelLabel(player);
       card.querySelector('.seat-model').title=playerModelLabel(player);
       card.querySelector('.seat-model').hidden=!!player.human;
-      card.querySelector('.seat-score').textContent=game.mode==='relay'?`第 ${game.index+1} 棒`:`${presentation.total} 分`;
+      card.querySelector('.seat-score').textContent=game.mode==='undercover'?(player.alive?'在场':'出局'):game.mode==='relay'?`第 ${game.index+1} 棒`:`${presentation.total} 分`;
       card.querySelector('.seat-score').hidden=false;
       card.querySelector('.seat-role').textContent=(player.id===(game.viewerId||'human')?'你 · ':player.human?'真人 · ':'')+presentation.role;
       card.querySelector('.seat-status').textContent=presentation.status;

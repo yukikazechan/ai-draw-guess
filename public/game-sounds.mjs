@@ -64,7 +64,7 @@ export function createSoundEvents(){
   }
   function countdown(game,viewerId='human',now=Date.now()){
     const clock=game?.clock,own=game?.results?.[viewerId];
-    const affected=clock?.stage==='draw'?game.artistId===viewerId:clock?.stage==='guess'&&own?.status==='waiting'&&!own.solved;
+    const affected=clock?.stage==='draw'?game.artistId===viewerId:clock?.stage==='speak'?game.undercover?.speakerId===viewerId:clock?.stage==='vote'?game.players?.some(p=>p.id===viewerId&&p.human&&p.alive)&&!game.undercover?.myVote:clock?.stage?.startsWith('relay-')?game.relay?.myTask?.status==='waiting':clock?.stage==='guess'&&own?.status==='waiting'&&!own.solved;
     if(!affected){clockKey='';clockSecond=null;return null;}
     const key=`${game.id}:${game.index}:${game.turn}:${clock.stage}`;
     const offset=clock.serverNow-(game.clockReceivedAt||now),second=Math.max(0,Math.ceil((clock.deadline-now-offset)/1000));

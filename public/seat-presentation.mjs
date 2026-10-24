@@ -8,6 +8,10 @@ export function seatCharacter(player){
   return resolveCharacter({...player,characterId:player.characterId==='none'?undefined:player.characterId})||CHARACTER_MAP.chatgpt;
 }
 export function seatPresentation(game,player,animating=false){
+  if(game.mode==='undercover'){
+    const result=game.results?.[player.id],speaking=game.undercover?.speakerId===player.id;
+    return {state:!player.alive?'spectator':speaking?(player.human?'idle':'thinking'):'idle',status:!player.alive?`已出局 · ${player.role==='undercover'?'卧底':'平民'}`:game.phase==='undercover-vote'?(result?.status==='submitted'?'已投票':'等待投票'):speaking?(result?.status==='retrying'?'正在重试发言…':'正在描述'):'听取描述',role:player.human?'真人选手':'AI 选手',artist:false,result,total:0};
+  }
   if(game.mode==='relay'){
     const result=game.results?.[player.id],artist=game.relay.kind==='draw',status=result?.status;
     return {state:characterState(game,player),status:status==='queued'?'排队中…':status==='error'?'连接失败':status==='skipped'?'本棒留空':status==='submitted'?(artist?'画好了，等大家交卷':submittedLabel(result?.confidence)):artist?'正在画画':'正在看图猜词',role:artist?'本棒画手':'本棒猜手',artist,result,total:0};
